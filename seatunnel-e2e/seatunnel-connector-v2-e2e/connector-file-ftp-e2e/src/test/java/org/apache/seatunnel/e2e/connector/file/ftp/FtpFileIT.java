@@ -199,7 +199,8 @@ public class FtpFileIT extends TestSuiteBase implements TestResource {
 
         // Confirm data is written correctly
         Container.ExecResult resultExecResult =
-                ftpContainer.execInContainer("sh", "-c", "awk 'END {print NR}' " + homePath + "/*");
+                ftpContainer.execInContainer(
+                        "sh", "-c", "awk 'END {print NR}' " + homePath + "/e2e.txt");
         Assertions.assertEquals("5", resultExecResult.getStdout().trim());
 
         deleteFileFromContainer(homePath);
