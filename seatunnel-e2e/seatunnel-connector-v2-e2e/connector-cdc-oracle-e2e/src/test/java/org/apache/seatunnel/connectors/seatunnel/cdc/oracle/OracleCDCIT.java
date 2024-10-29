@@ -23,6 +23,7 @@ import org.apache.seatunnel.e2e.common.container.EngineType;
 import org.apache.seatunnel.e2e.common.container.TestContainer;
 import org.apache.seatunnel.e2e.common.junit.DisabledOnContainer;
 import org.apache.seatunnel.e2e.common.junit.TestContainerExtension;
+import org.apache.seatunnel.e2e.common.util.JobIdGenerator;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
@@ -61,7 +62,7 @@ import static org.junit.Assert.assertNotNull;
 @Slf4j
 @DisabledOnContainer(
         value = {},
-        type = {EngineType.SPARK, EngineType.FLINK},
+        type = {EngineType.SPARK},
         disabledReason =
                 "Currently SPARK do not support cdc,Flink is prone to time out, temporarily disable")
 public class OracleCDCIT extends TestSuiteBase implements TestResource {
@@ -301,8 +302,8 @@ public class OracleCDCIT extends TestSuiteBase implements TestResource {
     @TestTemplate
     @DisabledOnContainer(
             value = {},
-            type = {EngineType.SPARK, EngineType.FLINK},
-            disabledReason = "Currently SPARK and FLINK do not support multi table")
+            type = {EngineType.SPARK},
+            disabledReason = "Currently SPARK do not support cdc")
     public void testOracleCdcMultiTableE2e(TestContainer container)
             throws IOException, InterruptedException {
 
@@ -378,7 +379,7 @@ public class OracleCDCIT extends TestSuiteBase implements TestResource {
     @DisabledOnContainer(
             value = {},
             type = {EngineType.SPARK, EngineType.FLINK},
-            disabledReason = "Currently SPARK and FLINK do not support multi table")
+            disabledReason = "Currently SPARK and FLINK do not support restore")
     public void testMultiTableWithRestore(TestContainer container)
             throws IOException, InterruptedException {
 
@@ -390,11 +391,13 @@ public class OracleCDCIT extends TestSuiteBase implements TestResource {
         insertSourceTable(DATABASE, SOURCE_TABLE1);
         insertSourceTable(DATABASE, SOURCE_TABLE2);
 
+        Long jobId = JobIdGenerator.newJobId();
         CompletableFuture.supplyAsync(
                 () -> {
                     try {
                         return container.executeJob(
-                                "/oraclecdc_to_oracle_with_multi_table_mode_one_table.conf");
+                                "/oraclecdc_to_oracle_with_multi_table_mode_one_table.conf",
+                                String.valueOf(jobId));
                     } catch (Exception e) {
                         log.error("Commit task exception :" + e.getMessage());
                         throw new RuntimeException(e);
@@ -432,26 +435,15 @@ public class OracleCDCIT extends TestSuiteBase implements TestResource {
                                                                 getSourceQuerySQL(
                                                                         DATABASE, SINK_TABLE1)))));
 
-        Pattern jobIdPattern =
-                Pattern.compile(
-                        ".*Init JobMaster for Job oraclecdc_to_oracle_with_multi_table_mode_one_table.conf \\(([0-9]*)\\).*",
-                        Pattern.DOTALL);
-        Matcher matcher = jobIdPattern.matcher(container.getServerLogs());
-        String jobId;
-        if (matcher.matches()) {
-            jobId = matcher.group(1);
-        } else {
-            throw new RuntimeException("Can not find jobId");
-        }
-
-        Assertions.assertEquals(0, container.savepointJob(jobId).getExitCode());
+        Assertions.assertEquals(0, container.savepointJob(String.valueOf(jobId)).getExitCode());
 
         // Restore job with add a new table
         CompletableFuture.supplyAsync(
                 () -> {
                     try {
                         container.restoreJob(
-                                "/oraclecdc_to_oracle_with_multi_table_mode_two_table.conf", jobId);
+                                "/oraclecdc_to_oracle_with_multi_table_mode_two_table.conf",
+                                String.valueOf(jobId));
                     } catch (Exception e) {
                         log.error("Commit task exception :" + e.getMessage());
                         throw new RuntimeException(e);
