@@ -145,6 +145,8 @@ public class HiveIT extends TestSuiteBase implements TestResource {
                                 "sh", "-c", "cd /tmp/seatunnel/lib && wget " + hadoopCosUrl());
                 Assertions.assertEquals(
                         0, downloadCosCommands.getExitCode(), downloadCosCommands.getStderr());
+                container.execInContainer("sh", "-c", "chmod -R 777  /tmp/seatunnel/lib");
+
             };
 
     @BeforeAll
