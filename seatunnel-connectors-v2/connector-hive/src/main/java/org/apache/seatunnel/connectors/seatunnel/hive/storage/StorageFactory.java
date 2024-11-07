@@ -34,5 +34,4 @@ public class StorageFactory {
             return new HDFSStorage(hiveSdLocation);
         }
     }
-
 }
