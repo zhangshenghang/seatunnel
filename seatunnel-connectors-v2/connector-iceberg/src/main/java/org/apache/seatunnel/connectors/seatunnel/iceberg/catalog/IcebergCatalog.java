@@ -23,6 +23,7 @@ import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.api.table.catalog.InfoPreviewResult;
 import org.apache.seatunnel.api.table.catalog.PhysicalColumn;
 import org.apache.seatunnel.api.table.catalog.PreviewResult;
+import org.apache.seatunnel.api.table.catalog.PrimaryKey;
 import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.api.table.catalog.TableSchema;
 import org.apache.seatunnel.api.table.catalog.exception.CatalogException;
@@ -36,6 +37,7 @@ import org.apache.seatunnel.connectors.seatunnel.iceberg.config.CommonConfig;
 import org.apache.seatunnel.connectors.seatunnel.iceberg.utils.SchemaUtils;
 
 import org.apache.iceberg.PartitionField;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.Namespace;
@@ -48,8 +50,11 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -58,6 +63,8 @@ import static org.apache.seatunnel.connectors.seatunnel.iceberg.utils.SchemaUtil
 
 @Slf4j
 public class IcebergCatalog implements Catalog {
+    public static final String PROPS_TABLE_COMMENT = "comment";
+
     private final String catalogName;
     private final ReadonlyConfig readonlyConfig;
     private final IcebergCatalogLoader icebergCatalogLoader;
@@ -222,7 +229,8 @@ public class IcebergCatalog implements Catalog {
     }
 
     public CatalogTable toCatalogTable(Table icebergTable, TablePath tablePath) {
-        List<Types.NestedField> columns = icebergTable.schema().columns();
+        Schema schema = icebergTable.schema();
+        List<Types.NestedField> columns = schema.columns();
         TableSchema.Builder builder = TableSchema.builder();
         columns.forEach(
                 nestedField -> {
@@ -234,24 +242,34 @@ public class IcebergCatalog implements Catalog {
                                     name,
                                     seaTunnelType,
                                     (Long) null,
-                                    true,
+                                    nestedField.isOptional(),
                                     null,
                                     nestedField.doc());
                     builder.column(physicalColumn);
                 });
-
+        Optional.ofNullable(schema.identifierFieldNames())
+                .map(
+                        (Function<Set<String>, Object>)
+                                names ->
+                                        builder.primaryKey(
+                                                PrimaryKey.of(
+                                                        tablePath.getTableName() + "_pk",
+                                                        new ArrayList<>(names))));
         List<String> partitionKeys =
                 icebergTable.spec().fields().stream()
                         .map(PartitionField::name)
                         .collect(Collectors.toList());
-
+        String comment =
+                Optional.ofNullable(icebergTable.properties())
+                        .map(e -> e.get(PROPS_TABLE_COMMENT))
+                        .orElse(null);
         return CatalogTable.of(
                 org.apache.seatunnel.api.table.catalog.TableIdentifier.of(
                         catalogName, tablePath.getDatabaseName(), tablePath.getTableName()),
                 builder.build(),
                 icebergTable.properties(),
                 partitionKeys,
-                null,
+                comment,
                 catalogName);
     }
 
