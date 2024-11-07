@@ -90,6 +90,7 @@ public class SeaTunnelContainer extends AbstractTestContainer {
                         .withCommand(buildStartCommand())
                         .withNetworkAliases("server")
                         .withExposedPorts()
+                        .withFileSystemBind("/tmp", "/opt/hive")
                         .withLogConsumer(
                                 new Slf4jLogConsumer(
                                         DockerLoggerFactory.getLogger(

@@ -94,20 +94,21 @@ public class HiveIT extends TestSuiteBase implements TestResource {
     private HiveContainer hiveServerContainer;
     private HiveContainer hmsContainer;
     private Connection hiveConnection;
+    private String pluginHiveDir = "/tmp/seatunnel/plugins/Hive/lib";
 
     @TestContainerExtension
     protected final ContainerExtendedFactory extendedFactory =
             container -> {
-                //                container.execInContainer("sh", "-c", "chmod -R 777 /etc/hosts");
-                //                // To avoid get a canonical host from a docker DNS server
-                //                container.execInContainer("sh", "-c", "echo `getent hosts hivee2e`
-                // >> /etc/hosts");
                 // The jar of hive-exec
                 Container.ExecResult downloadHiveExeCommands =
                         container.execInContainer(
                                 "sh",
                                 "-c",
-                                "mkdir -p /tmp/seatunnel/lib && cd /tmp/seatunnel/lib && wget "
+                                "mkdir -p "
+                                        + pluginHiveDir
+                                        + " && cd "
+                                        + pluginHiveDir
+                                        + " && wget "
                                         + hiveExeUrl());
                 Assertions.assertEquals(
                         0,
@@ -115,7 +116,7 @@ public class HiveIT extends TestSuiteBase implements TestResource {
                         downloadHiveExeCommands.getStderr());
                 Container.ExecResult downloadLibFb303Commands =
                         container.execInContainer(
-                                "sh", "-c", "cd /tmp/seatunnel/lib && wget " + libFb303Url());
+                                "sh", "-c", "cd " + pluginHiveDir + " && wget " + libFb303Url());
                 Assertions.assertEquals(
                         0,
                         downloadLibFb303Commands.getExitCode(),
@@ -123,7 +124,7 @@ public class HiveIT extends TestSuiteBase implements TestResource {
                 // The jar of s3
                 Container.ExecResult downloadS3Commands =
                         container.execInContainer(
-                                "sh", "-c", "cd /tmp/seatunnel/lib && wget " + hadoopAwsUrl());
+                                "sh", "-c", "cd " + pluginHiveDir + " && wget " + hadoopAwsUrl());
                 Assertions.assertEquals(
                         0, downloadS3Commands.getExitCode(), downloadS3Commands.getStderr());
                 // The jar of oss
@@ -131,7 +132,9 @@ public class HiveIT extends TestSuiteBase implements TestResource {
                         container.execInContainer(
                                 "sh",
                                 "-c",
-                                "cd /tmp/seatunnel/lib && wget "
+                                "cd "
+                                        + pluginHiveDir
+                                        + " && wget "
                                         + aliyunSdkOssUrl()
                                         + " && wget "
                                         + jdomUrl()
@@ -142,11 +145,9 @@ public class HiveIT extends TestSuiteBase implements TestResource {
                 // The jar of cos
                 Container.ExecResult downloadCosCommands =
                         container.execInContainer(
-                                "sh", "-c", "cd /tmp/seatunnel/lib && wget " + hadoopCosUrl());
+                                "sh", "-c", "cd " + pluginHiveDir + " && wget " + hadoopCosUrl());
                 Assertions.assertEquals(
                         0, downloadCosCommands.getExitCode(), downloadCosCommands.getStderr());
-                container.execInContainer("sh", "-c", "chmod -R 777  /tmp/seatunnel/lib");
-
             };
 
     @BeforeAll
@@ -160,7 +161,6 @@ public class HiveIT extends TestSuiteBase implements TestResource {
         hmsContainer.setPortBindings(Collections.singletonList("9083:9083"));
 
         Startables.deepStart(Stream.of(hmsContainer)).join();
-        log.info(hmsContainer.getLogs());
         log.info("HMS just started");
 
         hiveServerContainer =
@@ -168,6 +168,7 @@ public class HiveIT extends TestSuiteBase implements TestResource {
                         .withNetwork(NETWORK)
                         .withCreateContainerCmdModifier(cmd -> cmd.withName(HIVE_SERVER_HOST))
                         .withNetworkAliases(HIVE_SERVER_HOST)
+                        .withFileSystemBind("/tmp/data", "/opt/hive/data")
                         .withEnv(
                                 "SERVICE_OPTS",
                                 "-Dhive.metastore.uris=thrift://"
@@ -186,9 +187,7 @@ public class HiveIT extends TestSuiteBase implements TestResource {
         hiveServerContainer.setPortBindings(Collections.singletonList("10000:10000"));
 
         Startables.deepStart(Stream.of(hiveServerContainer)).join();
-        log.info(hiveServerContainer.getLogs());
         log.info("HiveServer2 just started");
-        log.info(hiveServerContainer.execInContainer("cat", "/tmp/hive/hive.log").getStdout());
         given().ignoreExceptions()
                 .await()
                 .atMost(360, TimeUnit.SECONDS)
@@ -231,6 +230,7 @@ public class HiveIT extends TestSuiteBase implements TestResource {
 
     private void executeJob(TestContainer container, String job1, String job2)
             throws IOException, InterruptedException {
+
         Container.ExecResult execResult = container.executeJob(job1);
         Assertions.assertEquals(0, execResult.getExitCode());
 
