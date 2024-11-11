@@ -24,10 +24,15 @@ import org.testcontainers.containers.Network;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.UUID;
 
 public interface TestContainer extends TestResource {
 
-    Network NETWORK = Network.newNetwork();
+    Network NETWORK =
+            Network.builder()
+                    .createNetworkCmdModifier(cmd -> cmd.withName("SEATUNNEL-" + UUID.randomUUID()))
+                    .enableIpv6(false)
+                    .build();
 
     TestContainerId identifier();
 
@@ -39,10 +44,20 @@ public interface TestContainer extends TestResource {
     Container.ExecResult executeJob(String confFile, List<String> variables)
             throws IOException, InterruptedException;
 
+    default Container.ExecResult executeJob(String confFile, String jobId)
+            throws IOException, InterruptedException {
+        throw new UnsupportedOperationException("Not implemented");
+    }
+
     default Container.ExecResult executeConnectorCheck(String[] args)
             throws IOException, InterruptedException {
         throw new UnsupportedOperationException("Not implemented");
-    };
+    }
+
+    default Container.ExecResult executeBaseCommand(String[] args)
+            throws IOException, InterruptedException {
+        throw new UnsupportedOperationException("Not implemented");
+    }
 
     default Container.ExecResult savepointJob(String jobId)
             throws IOException, InterruptedException {
@@ -51,6 +66,14 @@ public interface TestContainer extends TestResource {
 
     default Container.ExecResult restoreJob(String confFile, String jobId)
             throws IOException, InterruptedException {
+        throw new UnsupportedOperationException("Not implemented");
+    }
+
+    default Container.ExecResult cancelJob(String jobId) throws IOException, InterruptedException {
+        throw new UnsupportedOperationException("Not implemented");
+    }
+
+    default String getJobStatus(String jobId) {
         throw new UnsupportedOperationException("Not implemented");
     }
 

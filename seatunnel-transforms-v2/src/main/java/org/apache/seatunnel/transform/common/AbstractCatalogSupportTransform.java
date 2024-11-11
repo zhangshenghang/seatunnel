@@ -18,59 +18,27 @@
 package org.apache.seatunnel.transform.common;
 
 import org.apache.seatunnel.api.table.catalog.CatalogTable;
-import org.apache.seatunnel.api.table.catalog.TableIdentifier;
-import org.apache.seatunnel.api.table.catalog.TableSchema;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.transform.SeaTunnelTransform;
 
 import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
-public abstract class AbstractCatalogSupportTransform implements SeaTunnelTransform<SeaTunnelRow> {
-    protected CatalogTable inputCatalogTable;
-
-    protected volatile CatalogTable outputCatalogTable;
-
+@Slf4j
+public abstract class AbstractCatalogSupportTransform
+        extends AbstractSeaTunnelTransform<SeaTunnelRow, SeaTunnelRow>
+        implements SeaTunnelTransform<SeaTunnelRow> {
     public AbstractCatalogSupportTransform(@NonNull CatalogTable inputCatalogTable) {
-        this.inputCatalogTable = inputCatalogTable;
+        super(inputCatalogTable);
+    }
+
+    public AbstractCatalogSupportTransform(
+            @NonNull CatalogTable inputCatalogTable, ErrorHandleWay rowErrorHandleWay) {
+        super(inputCatalogTable, rowErrorHandleWay);
     }
 
     @Override
     public SeaTunnelRow map(SeaTunnelRow row) {
-        return transformRow(row);
+        return transform(row);
     }
-
-    /**
-     * Outputs transformed row data.
-     *
-     * @param inputRow upstream input row data
-     */
-    protected abstract SeaTunnelRow transformRow(SeaTunnelRow inputRow);
-
-    @Override
-    public CatalogTable getProducedCatalogTable() {
-        if (outputCatalogTable == null) {
-            synchronized (this) {
-                if (outputCatalogTable == null) {
-                    outputCatalogTable = transformCatalogTable();
-                }
-            }
-        }
-
-        return outputCatalogTable;
-    }
-
-    private CatalogTable transformCatalogTable() {
-        TableIdentifier tableIdentifier = transformTableIdentifier();
-        TableSchema tableSchema = transformTableSchema();
-        return CatalogTable.of(
-                tableIdentifier,
-                tableSchema,
-                inputCatalogTable.getOptions(),
-                inputCatalogTable.getPartitionKeys(),
-                inputCatalogTable.getComment());
-    }
-
-    protected abstract TableSchema transformTableSchema();
-
-    protected abstract TableIdentifier transformTableIdentifier();
 }

@@ -140,6 +140,8 @@ public class JdbcCatalogUtils {
                                 .partitionNumber(tableConfig.getPartitionNumber())
                                 .partitionStart(tableConfig.getPartitionStart())
                                 .partitionEnd(tableConfig.getPartitionEnd())
+                                .useSelectCount(tableConfig.getUseSelectCount())
+                                .skipAnalyze(tableConfig.getSkipAnalyze())
                                 .catalogTable(catalogTable)
                                 .build();
 
@@ -230,10 +232,12 @@ public class JdbcCatalogUtils {
                                                 && columnsOfPath
                                                         .get(column.getName())
                                                         .getDataType()
+                                                        .getSqlType()
                                                         .equals(
                                                                 columnsOfQuery
                                                                         .get(column.getName())
-                                                                        .getDataType()))
+                                                                        .getDataType()
+                                                                        .getSqlType()))
                         .map(column -> columnsOfPath.get(column.getName()))
                         .collect(Collectors.toList());
         boolean schemaIncludeAllColumns = columnsOfMerge.size() == columnKeysOfQuery.size();

@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.connectors.seatunnel.jdbc.sink;
 
+import org.apache.seatunnel.api.event.EventType;
 import org.apache.seatunnel.api.sink.SinkWriter;
 import org.apache.seatunnel.api.sink.SupportMultiTableSinkWriter;
 import org.apache.seatunnel.api.table.catalog.Column;
@@ -47,6 +48,7 @@ import org.apache.commons.lang3.StringUtils;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.sql.Connection;
 import java.util.List;
 
 @Slf4j
@@ -66,22 +68,22 @@ public abstract class AbstractJdbcSinkWriter<ResourceT>
     public void applySchemaChange(SchemaChangeEvent event) throws IOException {
         if (event instanceof AlterTableColumnsEvent) {
             AlterTableColumnsEvent alterTableColumnsEvent = (AlterTableColumnsEvent) event;
-            String sourceDialectName = alterTableColumnsEvent.getSourceDialectName();
-            if (StringUtils.isBlank(sourceDialectName)) {
-                throw new SeaTunnelException(
-                        "The sourceDialectName in AlterTableColumnEvent can not be empty");
-            }
             List<AlterTableColumnEvent> events = alterTableColumnsEvent.getEvents();
             for (AlterTableColumnEvent alterTableColumnEvent : events) {
-                processSchemaChangeEvent(alterTableColumnEvent, sourceDialectName);
+                String sourceDialectName = alterTableColumnEvent.getSourceDialectName();
+                if (StringUtils.isBlank(sourceDialectName)) {
+                    throw new SeaTunnelException(
+                            "The sourceDialectName in AlterTableColumnEvent can not be empty. event: "
+                                    + event);
+                }
+                processSchemaChangeEvent(alterTableColumnEvent);
             }
         } else {
             log.warn("We only support AlterTableColumnsEvent, but actual event is " + event);
         }
     }
 
-    protected void processSchemaChangeEvent(AlterTableColumnEvent event, String sourceDialectName)
-            throws IOException {
+    protected void processSchemaChangeEvent(AlterTableColumnEvent event) throws IOException {
         TableSchema newTableSchema = this.tableSchema.copy();
         List<Column> columns = newTableSchema.getColumns();
         switch (event.getEventType()) {
@@ -95,31 +97,31 @@ public abstract class AbstractJdbcSinkWriter<ResourceT>
                 break;
             case SCHEMA_CHANGE_MODIFY_COLUMN:
                 Column modifyColumn = ((AlterTableModifyColumnEvent) event).getColumn();
-                replaceColumnByIndex(columns, modifyColumn.getName(), modifyColumn);
+                replaceColumnByIndex(
+                        event.getEventType(), columns, modifyColumn.getName(), modifyColumn);
                 break;
             case SCHEMA_CHANGE_CHANGE_COLUMN:
                 AlterTableChangeColumnEvent alterTableChangeColumnEvent =
                         (AlterTableChangeColumnEvent) event;
                 Column changeColumn = alterTableChangeColumnEvent.getColumn();
                 String oldColumnName = alterTableChangeColumnEvent.getOldColumn();
-                replaceColumnByIndex(columns, oldColumnName, changeColumn);
+                replaceColumnByIndex(event.getEventType(), columns, oldColumnName, changeColumn);
                 break;
             default:
                 throw new SeaTunnelException(
                         "Unsupported schemaChangeEvent for event type: " + event.getEventType());
         }
         this.tableSchema = newTableSchema;
-        reOpenOutputFormat(event, sourceDialectName);
+        reOpenOutputFormat(event);
     }
 
-    protected void reOpenOutputFormat(AlterTableColumnEvent event, String sourceDialectName)
-            throws IOException {
+    protected void reOpenOutputFormat(AlterTableColumnEvent event) throws IOException {
         this.prepareCommit();
-        try {
-            JdbcConnectionProvider refreshTableSchemaConnectionProvider =
-                    dialect.getJdbcConnectionProvider(jdbcSinkConfig.getJdbcConnectionConfig());
-            dialect.refreshTableSchemaBySchemaChangeEvent(
-                    sourceDialectName, event, refreshTableSchemaConnectionProvider, sinkTablePath);
+        JdbcConnectionProvider refreshTableSchemaConnectionProvider =
+                dialect.getJdbcConnectionProvider(jdbcSinkConfig.getJdbcConnectionConfig());
+        try (Connection connection =
+                refreshTableSchemaConnectionProvider.getOrEstablishConnection()) {
+            dialect.applySchemaChange(event, connection, sinkTablePath);
         } catch (Throwable e) {
             throw new JdbcConnectorException(
                     JdbcConnectorErrorCode.REFRESH_PHYSICAL_TABLESCHEMA_BY_SCHEMA_CHANGE_EVENT, e);
@@ -132,10 +134,17 @@ public abstract class AbstractJdbcSinkWriter<ResourceT>
     }
 
     protected void replaceColumnByIndex(
-            List<Column> columns, String oldColumnName, Column newColumn) {
+            EventType eventType, List<Column> columns, String oldColumnName, Column newColumn) {
         for (int i = 0; i < columns.size(); i++) {
-            if (columns.get(i).getName().equalsIgnoreCase(oldColumnName)) {
-                columns.set(i, newColumn);
+            Column column = columns.get(i);
+            if (column.getName().equalsIgnoreCase(oldColumnName)) {
+                // rename ...... to ......  which just has column name
+                if (eventType.equals(EventType.SCHEMA_CHANGE_CHANGE_COLUMN)
+                        && newColumn.getDataType() == null) {
+                    columns.set(i, column.rename(newColumn.getName()));
+                } else {
+                    columns.set(i, newColumn);
+                }
             }
         }
     }

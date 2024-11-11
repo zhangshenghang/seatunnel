@@ -17,16 +17,21 @@
 
 package org.apache.seatunnel.connectors.seatunnel.cdc.mongodb.sender;
 
+import org.apache.seatunnel.shade.com.google.common.annotations.VisibleForTesting;
+
 import org.apache.seatunnel.api.source.Collector;
+import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.api.table.type.ArrayType;
 import org.apache.seatunnel.api.table.type.DecimalType;
 import org.apache.seatunnel.api.table.type.MapType;
+import org.apache.seatunnel.api.table.type.MetadataUtil;
 import org.apache.seatunnel.api.table.type.MultipleRowType;
 import org.apache.seatunnel.api.table.type.RowKind;
 import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
 import org.apache.seatunnel.api.table.type.SqlType;
+import org.apache.seatunnel.connectors.cdc.base.utils.SourceRecordUtils;
 import org.apache.seatunnel.connectors.cdc.debezium.DebeziumDeserializationSchema;
 import org.apache.seatunnel.connectors.seatunnel.cdc.mongodb.exception.MongodbConnectorException;
 
@@ -62,10 +67,13 @@ import java.util.Objects;
 import static org.apache.seatunnel.common.exception.CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT;
 import static org.apache.seatunnel.common.exception.CommonErrorCodeDeprecated.UNSUPPORTED_DATA_TYPE;
 import static org.apache.seatunnel.common.exception.CommonErrorCodeDeprecated.UNSUPPORTED_OPERATION;
+import static org.apache.seatunnel.connectors.seatunnel.cdc.mongodb.config.MongodbSourceOptions.COLL_FIELD;
+import static org.apache.seatunnel.connectors.seatunnel.cdc.mongodb.config.MongodbSourceOptions.DB_FIELD;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.mongodb.config.MongodbSourceOptions.DEFAULT_JSON_WRITER_SETTINGS;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.mongodb.config.MongodbSourceOptions.DOCUMENT_KEY;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.mongodb.config.MongodbSourceOptions.ENCODE_VALUE_FIELD;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.mongodb.config.MongodbSourceOptions.FULL_DOCUMENT;
+import static org.apache.seatunnel.connectors.seatunnel.cdc.mongodb.config.MongodbSourceOptions.NS_FIELD;
 import static org.apache.seatunnel.connectors.seatunnel.cdc.mongodb.utils.MongodbRecordUtils.extractBsonDocument;
 import static org.apache.seatunnel.shade.com.google.common.base.Preconditions.checkNotNull;
 
@@ -105,18 +113,27 @@ public class MongoDBConnectorDeserializationSchema
             log.debug("Ignore newly added table {}", tableId);
             return;
         }
-
+        Long fetchTimestamp = SourceRecordUtils.getFetchTimestamp(record);
+        Long messageTimestamp = SourceRecordUtils.getMessageTimestamp(record);
+        long delay = -1L;
+        if (fetchTimestamp != null && messageTimestamp != null) {
+            delay = fetchTimestamp - messageTimestamp;
+        }
         switch (op) {
             case INSERT:
                 SeaTunnelRow insert = extractRowData(tableRowConverter, fullDocument);
                 insert.setRowKind(RowKind.INSERT);
                 insert.setTableId(tableId);
+                MetadataUtil.setDelay(insert, delay);
+                MetadataUtil.setEventTime(insert, fetchTimestamp);
                 emit(record, insert, out);
                 break;
             case DELETE:
                 SeaTunnelRow delete = extractRowData(tableRowConverter, documentKey);
                 delete.setRowKind(RowKind.DELETE);
                 delete.setTableId(tableId);
+                MetadataUtil.setDelay(delete, delay);
+                MetadataUtil.setEventTime(delete, fetchTimestamp);
                 emit(record, delete, out);
                 break;
             case UPDATE:
@@ -126,12 +143,16 @@ public class MongoDBConnectorDeserializationSchema
                 SeaTunnelRow updateAfter = extractRowData(tableRowConverter, fullDocument);
                 updateAfter.setRowKind(RowKind.UPDATE_AFTER);
                 updateAfter.setTableId(tableId);
+                MetadataUtil.setDelay(updateAfter, delay);
+                MetadataUtil.setEventTime(updateAfter, fetchTimestamp);
                 emit(record, updateAfter, out);
                 break;
             case REPLACE:
                 SeaTunnelRow replaceAfter = extractRowData(tableRowConverter, fullDocument);
                 replaceAfter.setRowKind(RowKind.UPDATE_AFTER);
                 replaceAfter.setTableId(tableId);
+                MetadataUtil.setDelay(replaceAfter, delay);
+                MetadataUtil.setEventTime(replaceAfter, fetchTimestamp);
                 emit(record, replaceAfter, out);
                 break;
             case INVALIDATE:
@@ -169,8 +190,16 @@ public class MongoDBConnectorDeserializationSchema
     }
 
     private String extractTableId(SourceRecord record) {
-        // TODO extract table id from record
-        return null;
+        Struct messageStruct = (Struct) record.value();
+        Struct nsStruct = (Struct) messageStruct.get(NS_FIELD);
+        String databaseName = nsStruct.getString(DB_FIELD);
+        String tableName = nsStruct.getString(COLL_FIELD);
+        return TablePath.of(databaseName, null, tableName).toString();
+    }
+
+    @VisibleForTesting
+    public String extractTableIdForTest(SourceRecord record) {
+        return extractTableId(record);
     }
 
     // -------------------------------------------------------------------------------------

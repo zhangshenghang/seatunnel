@@ -17,13 +17,18 @@
 
 package org.apache.seatunnel.e2e.common.container.seatunnel;
 
+import org.apache.seatunnel.shade.com.fasterxml.jackson.databind.node.ObjectNode;
+
 import org.apache.seatunnel.common.utils.FileUtils;
+import org.apache.seatunnel.common.utils.JsonUtils;
 import org.apache.seatunnel.e2e.common.container.AbstractTestContainer;
 import org.apache.seatunnel.e2e.common.container.ContainerExtendedFactory;
 import org.apache.seatunnel.e2e.common.container.TestContainer;
 import org.apache.seatunnel.e2e.common.container.TestContainerId;
 import org.apache.seatunnel.e2e.common.util.ContainerUtil;
 
+import org.apache.commons.compress.utils.Lists;
+import org.apache.http.HttpStatus;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -86,18 +91,17 @@ public class SeaTunnelContainer extends AbstractTestContainer {
                 new GenericContainer<>(getDockerImage())
                         .withNetwork(NETWORK)
                         .withEnv("TZ", "UTC")
-                        .withCommand(
-                                ContainerUtil.adaptPathForWin(
-                                        Paths.get(SEATUNNEL_HOME, "bin", SERVER_SHELL).toString()))
+                        .withCommand(buildStartCommand())
                         .withNetworkAliases("server")
                         .withExposedPorts()
+                        .withFileSystemBind("/tmp", "/opt/hive")
                         .withLogConsumer(
                                 new Slf4jLogConsumer(
                                         DockerLoggerFactory.getLogger(
                                                 "seatunnel-engine:" + JDK_DOCKER_IMAGE)))
                         .waitingFor(Wait.forLogMessage(".*received new worker register:.*", 1));
         copySeaTunnelStarterToContainer(server);
-        server.setPortBindings(Collections.singletonList("5801:5801"));
+        server.setPortBindings(Arrays.asList("5801:5801", "8080:8080"));
         server.withCopyFileToContainer(
                 MountableFile.forHostPath(
                         PROJECT_ROOT_PATH
@@ -115,6 +119,12 @@ public class SeaTunnelContainer extends AbstractTestContainer {
         server.start();
 
         return server;
+    }
+
+    protected String[] buildStartCommand() {
+        return new String[] {
+            ContainerUtil.adaptPathForWin(Paths.get(SEATUNNEL_HOME, "bin", SERVER_SHELL).toString())
+        };
     }
 
     protected GenericContainer<?> createSeaTunnelContainerWithFakeSourceAndInMemorySink(
@@ -238,6 +248,11 @@ public class SeaTunnelContainer extends AbstractTestContainer {
     }
 
     @Override
+    protected String getCancelJobCommand() {
+        return "-can";
+    }
+
+    @Override
     protected String getRestoreCommand() {
         return "-r";
     }
@@ -265,19 +280,39 @@ public class SeaTunnelContainer extends AbstractTestContainer {
         return executeCommand(server, command);
     }
 
+    public Container.ExecResult executeBaseCommand(String[] args)
+            throws IOException, InterruptedException {
+        final List<String> command = new ArrayList<>();
+        String binPath = Paths.get(SEATUNNEL_HOME, "bin", getStartShellName()).toString();
+        command.add(adaptPathForWin(binPath));
+        Arrays.stream(args).forEach(arg -> command.add(arg));
+        return executeCommand(server, command);
+    }
+
     @Override
     public Container.ExecResult executeJob(String confFile)
             throws IOException, InterruptedException {
-        return executeJob(confFile, null);
+        return executeJob(confFile, Lists.newArrayList());
     }
 
     @Override
     public Container.ExecResult executeJob(String confFile, List<String> variables)
             throws IOException, InterruptedException {
+        return executeJob(confFile, null, variables);
+    }
+
+    @Override
+    public Container.ExecResult executeJob(String confFile, String jobId)
+            throws IOException, InterruptedException {
+        return executeJob(confFile, jobId, null);
+    }
+
+    private Container.ExecResult executeJob(String confFile, String jobId, List<String> variables)
+            throws IOException, InterruptedException {
         log.info("test in container: {}", identifier());
         List<String> beforeThreads = ContainerUtil.getJVMThreadNames(server);
         runningCount.incrementAndGet();
-        Container.ExecResult result = executeJob(server, confFile, variables);
+        Container.ExecResult result = executeJob(server, confFile, jobId, variables);
         if (runningCount.decrementAndGet() > 0) {
             // only check thread when job all finished.
             return result;
@@ -309,7 +344,6 @@ public class SeaTunnelContainer extends AbstractTestContainer {
                                                         .collect(Collectors.joining()));
                             });
         }
-        //        classLoaderObjectCheck(1);
         return result;
     }
 
@@ -363,7 +397,8 @@ public class SeaTunnelContainer extends AbstractTestContainer {
                 // The renewed background thread of the hdfs client
                 || s.startsWith("LeaseRenewer")
                 // The read of hdfs which has the thread that is all in running status
-                || s.startsWith("org.apache.hadoop.hdfs.PeerCache");
+                || s.startsWith("org.apache.hadoop.hdfs.PeerCache")
+                || s.startsWith("java-sdk-progress-listener-callback-thread");
     }
 
     private void classLoaderObjectCheck(Integer maxSize) throws IOException, InterruptedException {
@@ -435,7 +470,9 @@ public class SeaTunnelContainer extends AbstractTestContainer {
                 // JDBC Hana driver
                 || threadName.startsWith("Thread-")
                 // JNA Cleaner
-                || threadName.startsWith("JNA Cleaner");
+                || threadName.startsWith("JNA Cleaner")
+                // GRPC client
+                || threadName.startsWith("grpc");
     }
 
     @Override
@@ -451,6 +488,29 @@ public class SeaTunnelContainer extends AbstractTestContainer {
         Container.ExecResult result = restoreJob(server, confFile, jobId);
         runningCount.decrementAndGet();
         return result;
+    }
+
+    @Override
+    public Container.ExecResult cancelJob(String jobId) throws IOException, InterruptedException {
+        return cancelJob(server, jobId);
+    }
+
+    @Override
+    public String getJobStatus(String jobId) {
+        HttpGet get = new HttpGet("http://" + server.getHost() + ":8080/job-info/" + jobId);
+        try (CloseableHttpClient client = HttpClients.createDefault()) {
+            CloseableHttpResponse response = client.execute(get);
+            if (response.getStatusLine().getStatusCode() == HttpStatus.SC_OK) {
+                String jobStatus = EntityUtils.toString(response.getEntity());
+                ObjectNode jsonNodes = JsonUtils.parseObject(jobStatus);
+                if (jsonNodes.has("jobStatus")) {
+                    return jsonNodes.get("jobStatus").asText();
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return null;
     }
 
     @Override

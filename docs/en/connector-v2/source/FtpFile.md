@@ -60,6 +60,7 @@ If you use SeaTunnel Engine, It automatically integrated the hadoop jar when you
 | xml_use_attr_format       | boolean | no       | -                   |
 | file_filter_pattern       | string  | no       | -                   |
 | compress_codec            | string  | no       | none                |
+| archive_compress_codec    | string  | no       | none                |
 | encoding                  | string  | no       | UTF-8               |
 | common-options            |         | no       | -                   |
 
@@ -82,6 +83,59 @@ The target ftp password is required
 ### path [string]
 
 The source file path.
+
+### file_filter_pattern [string]
+
+Filter pattern, which used for filtering files.
+
+The pattern follows standard regular expressions. For details, please refer to https://en.wikipedia.org/wiki/Regular_expression.
+There are some examples.
+
+File Structure Example:
+```
+/data/seatunnel/20241001/report.txt
+/data/seatunnel/20241007/abch202410.csv
+/data/seatunnel/20241002/abcg202410.csv
+/data/seatunnel/20241005/old_data.csv
+/data/seatunnel/20241012/logo.png
+```
+Matching Rules Example:
+
+**Example 1**: *Match all .txt files*，Regular Expression:
+```
+/data/seatunnel/20241001/.*\.txt
+```
+The result of this example matching is:
+```
+/data/seatunnel/20241001/report.txt
+```
+**Example 2**: *Match all file starting with abc*，Regular Expression:
+```
+/data/seatunnel/20241002/abc.*
+```
+The result of this example matching is:
+```
+/data/seatunnel/20241007/abch202410.csv
+/data/seatunnel/20241002/abcg202410.csv
+```
+**Example 3**: *Match all file starting with abc，And the fourth character is either h or g*, the Regular Expression:
+```
+/data/seatunnel/20241007/abc[h,g].*
+```
+The result of this example matching is:
+```
+/data/seatunnel/20241007/abch202410.csv
+```
+**Example 4**: *Match third level folders starting with 202410 and files ending with .csv*, the Regular Expression:
+```
+/data/seatunnel/202410\d*/.*\.csv
+```
+The result of this example matching is:
+```
+/data/seatunnel/20241007/abch202410.csv
+/data/seatunnel/20241002/abcg202410.csv
+/data/seatunnel/20241005/old_data.csv
+```
 
 ### file_format_type [string]
 
@@ -265,6 +319,17 @@ The compress codec of files and the details that supported as the following show
 - orc/parquet:  
   automatically recognizes the compression type, no additional settings required.
 
+### archive_compress_codec [string]
+
+The compress codec of archive files and the details that supported as the following shown:
+
+| archive_compress_codec | file_format        | archive_compress_suffix |
+|------------------------|--------------------|-------------------------|
+| ZIP                    | txt,json,excel,xml | .zip                    |
+| TAR                    | txt,json,excel,xml | .tar                    |
+| TAR_GZ                 | txt,json,excel,xml | .tar.gz                 |
+| NONE                   | all                | .*                      |
+
 ### encoding [string]
 
 Only used when file_format_type is json,text,csv,xml.
@@ -291,6 +356,67 @@ Source plugin common parameters, please refer to [Source Common Options](../sour
     }
     field_delimiter = "#"
   }
+
+```
+
+### Multiple Table
+
+```hocon
+
+FtpFile {
+  tables_configs = [
+    {
+      schema {
+        table = "student"
+      }
+      path = "/tmp/seatunnel/sink/text"
+      host = "192.168.31.48"
+      port = 21
+      user = tyrantlucifer
+      password = tianchao
+      file_format_type = "parquet"
+    },
+    {
+      schema {
+        table = "teacher"
+      }
+      path = "/tmp/seatunnel/sink/text"
+      host = "192.168.31.48"
+      port = 21
+      user = tyrantlucifer
+      password = tianchao
+      file_format_type = "parquet"
+    }
+  ]
+}
+
+```
+
+```hocon
+
+FtpFile {
+  tables_configs = [
+    {
+      schema {
+        fields {
+          name = string
+          age = int
+        }
+      }
+      path = "/apps/hive/demo/student"
+      file_format_type = "json"
+    },
+    {
+      schema {
+        fields {
+          name = string
+          age = int
+        }
+      }
+      path = "/apps/hive/demo/teacher"
+      file_format_type = "json"
+    }
+}
 
 ```
 
@@ -325,6 +451,33 @@ sink {
   }
 }
 
+```
+
+### Filter File
+
+```hocon
+env {
+  parallelism = 1
+  job.mode = "BATCH"
+}
+
+source {
+  FtpFile {
+    host = "192.168.31.48"
+    port = 21
+    user = tyrantlucifer
+    password = tianchao
+    path = "/seatunnel/read/binary/"
+    file_format_type = "binary"
+    // file example abcD2024.csv
+    file_filter_pattern = "abc[DX]*.*"
+  }
+}
+
+sink {
+  Console {
+  }
+}
 ```
 
 ## Changelog

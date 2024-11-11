@@ -23,6 +23,7 @@ import org.apache.seatunnel.api.table.catalog.ConstraintKey;
 import org.apache.seatunnel.api.table.catalog.TableIdentifier;
 import org.apache.seatunnel.api.table.catalog.TableSchema;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
+import org.apache.seatunnel.api.table.type.SeaTunnelRowAccessor;
 
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -137,4 +138,12 @@ public abstract class SingleFieldOutputTransform extends AbstractCatalogSupportT
     }
 
     protected abstract Column getOutputColumn();
+
+    public int getFieldIndex() {
+        return fieldIndex;
+    }
+
+    public SeaTunnelRowContainerGenerator getRowContainerGenerator() {
+        return rowContainerGenerator;
+    }
 }

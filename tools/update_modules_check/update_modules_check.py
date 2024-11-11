@@ -149,6 +149,7 @@ def get_sub_it_modules(modules, total_num, current_num):
     modules_arr.remove("connector-kudu-e2e")
     modules_arr.remove("connector-amazonsqs-e2e")
     modules_arr.remove("connector-doris-e2e")
+    modules_arr.remove("connector-paimon-e2e")
     modules_arr.remove("connector-cdc-oracle-e2e")
     output = ""
     for i, module in enumerate(modules_arr):
@@ -175,8 +176,14 @@ def get_sub_update_it_modules(modules, total_num, current_num):
         module_list.remove("connector-rocketmq-e2e")
     if "seatunnel-engine-k8s-e2e" in module_list:
         module_list.remove("seatunnel-engine-k8s-e2e")
+    if "connector-seatunnel-e2e-base" in module_list:
+        module_list.remove("connector-seatunnel-e2e-base")
+    if "connector-console-seatunnel-e2e" in module_list:
+        module_list.remove("connector-console-seatunnel-e2e")
     if "connector-doris-e2e" in module_list:
         module_list.remove("connector-doris-e2e")
+    if "connector-paimon-e2e" in module_list:
+        module_list.remove("connector-paimon-e2e")
     if "connector-cdc-oracle-e2e" in module_list:
         module_list.remove("connector-cdc-oracle-e2e")
     for i, module in enumerate(module_list):
