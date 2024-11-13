@@ -507,8 +507,6 @@ public class SeaTunnelContainer extends AbstractTestContainer {
                     return jsonNodes.get("jobStatus").asText();
                 }
             }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         }
         return null;
     }
