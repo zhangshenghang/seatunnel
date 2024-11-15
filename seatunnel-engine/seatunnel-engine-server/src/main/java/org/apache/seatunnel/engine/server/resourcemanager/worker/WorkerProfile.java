@@ -52,8 +52,7 @@ public class WorkerProfile implements IdentifiedDataSerializable {
 
     private Map<String, String> attributes;
 
-    private double cpuUsage;
-    private double memoryUsage;
+    private double systemLoad;
 
     public WorkerProfile(Address address) {
         this.address = address;

@@ -22,6 +22,7 @@ import org.apache.seatunnel.engine.common.runtime.ExecutionMode;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.ReleaseSlotOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.ResetResourceOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.SyncWorkerProfileOperation;
+import org.apache.seatunnel.engine.server.resourcemanager.opeartion.WorkerSystemLoadOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
@@ -32,6 +33,7 @@ import com.hazelcast.cluster.Member;
 import com.hazelcast.internal.services.MembershipServiceEvent;
 import com.hazelcast.spi.impl.NodeEngine;
 import com.hazelcast.spi.impl.operationservice.Operation;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -42,6 +44,9 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -55,9 +60,13 @@ public abstract class AbstractResourceManager implements ResourceManager {
 
     private final ExecutionMode mode;
 
-    private final EngineConfig engineConfig;
+    @Getter private final EngineConfig engineConfig;
 
     private volatile boolean isRunning = true;
+
+    private ScheduledExecutorService scheduledExecutorService;
+
+    private static final long DEFAULT_SYSTEM_LOAD_PERIOD = 10000;
 
     public AbstractResourceManager(NodeEngine nodeEngine, EngineConfig engineConfig) {
         this.registerWorker = new ConcurrentHashMap<>();
@@ -74,6 +83,14 @@ public abstract class AbstractResourceManager implements ResourceManager {
 
     private void initWorker() {
         log.info("initWorker... ");
+        scheduledExecutorService =
+                Executors.newSingleThreadScheduledExecutor(
+                        r ->
+                                new Thread(
+                                        r,
+                                        String.format(
+                                                "hz.%s.seaTunnel.ResourceManager.thread",
+                                                nodeEngine.getHazelcastInstance().getName())));
         List<Address> aliveNode =
                 nodeEngine.getClusterService().getMembers().stream()
                         .map(Member::getAddress)
@@ -98,6 +115,44 @@ public abstract class AbstractResourceManager implements ResourceManager {
                                                         }))
                         .collect(Collectors.toList());
         futures.forEach(CompletableFuture::join);
+
+        scheduledExecutorService.scheduleAtFixedRate(
+                () -> {
+                    try {
+                        log.debug(
+                                "start send system load to resource manager, this address: "
+                                        + nodeEngine.getClusterService().getThisAddress());
+                        nodeEngine.getClusterService().getMembers().stream()
+                                .map(Member::getAddress)
+                                .collect(Collectors.toList())
+                                .stream()
+                                .forEach(
+                                        node ->
+                                                sendToMember(new WorkerSystemLoadOperation(), node)
+                                                        .thenAccept(
+                                                                systemLoad -> {
+                                                                    WorkerProfile workerProfile =
+                                                                            registerWorker.get(
+                                                                                    node);
+                                                                    if (workerProfile != null) {
+                                                                        workerProfile.setSystemLoad(
+                                                                                (Double)
+                                                                                        systemLoad);
+                                                                        log.debug(
+                                                                                "Node:{} systemLoad:{}",
+                                                                                node,
+                                                                                systemLoad);
+                                                                    }
+                                                                }));
+                    } catch (Exception e) {
+                        log.warn(
+                                "failed send system load to resource manager, will retry later. this address: "
+                                        + nodeEngine.getClusterService().getThisAddress());
+                    }
+                },
+                0,
+                DEFAULT_SYSTEM_LOAD_PERIOD,
+                TimeUnit.MILLISECONDS);
         log.info("registerWorker: {}", registerWorker);
     }
 
@@ -238,6 +293,10 @@ public abstract class AbstractResourceManager implements ResourceManager {
         } else {
             log.debug("received worker heartbeat from: " + workerProfile.getAddress());
         }
+        workerProfile.setSystemLoad(
+                registerWorker.get(workerProfile.getAddress()) == null
+                        ? 0.0
+                        : registerWorker.get(workerProfile.getAddress()).getSystemLoad());
         registerWorker.put(workerProfile.getAddress(), workerProfile);
     }
 

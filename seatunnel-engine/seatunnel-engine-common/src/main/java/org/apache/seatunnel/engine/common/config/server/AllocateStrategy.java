@@ -17,31 +17,9 @@
 
 package org.apache.seatunnel.engine.common.config.server;
 
-import lombok.Data;
-
 import java.io.Serializable;
 
-import static com.hazelcast.internal.util.Preconditions.checkNotNull;
-import static com.hazelcast.internal.util.Preconditions.checkPositive;
-
-@Data
-public class SlotServiceConfig implements Serializable {
-
-    private AllocateStrategy allocateStrategy =
-            ServerConfigOptions.SLOT_ALLOCATE_STRATEGY.defaultValue();
-
-    private boolean dynamicSlot = ServerConfigOptions.DYNAMIC_SLOT.defaultValue();
-
-    private int slotNum = ServerConfigOptions.SLOT_NUM.defaultValue();
-
-    public void setSlotNum(int slotNum) {
-        checkPositive(slotNum, ServerConfigOptions.SLOT_NUM + " must be > 0");
-        this.slotNum = slotNum;
-    }
-
-    public SlotServiceConfig setAllocateStrategy(AllocateStrategy allocateStrategy) {
-        checkNotNull(allocateStrategy);
-        this.allocateStrategy = allocateStrategy;
-        return this;
-    }
+public enum AllocateStrategy implements Serializable {
+    SYSTEM_LOAD,
+    SLOT_RATIO
 }

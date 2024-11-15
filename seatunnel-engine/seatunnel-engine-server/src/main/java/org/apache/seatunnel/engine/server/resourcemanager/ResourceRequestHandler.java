@@ -19,6 +19,7 @@ package org.apache.seatunnel.engine.server.resourcemanager;
 
 import org.apache.seatunnel.shade.com.google.common.annotations.VisibleForTesting;
 
+import org.apache.seatunnel.engine.common.config.server.AllocateStrategy;
 import org.apache.seatunnel.engine.common.runtime.DeployType;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.RequestSlotOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
@@ -38,6 +39,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Collectors;
 
 import static com.hazelcast.jet.impl.util.ExceptionUtil.withTryCatch;
 
@@ -62,6 +64,8 @@ public class ResourceRequestHandler {
 
     private final AbstractResourceManager resourceManager;
 
+    private final AllocateStrategy allocateStrategy;
+
     public ResourceRequestHandler(
             long jobId,
             List<ResourceProfile> resourceProfile,
@@ -73,6 +77,8 @@ public class ResourceRequestHandler {
         this.resourceProfile = resourceProfile;
         this.registerWorker = registerWorker;
         this.resourceManager = resourceManager;
+        this.allocateStrategy =
+                resourceManager.getEngineConfig().getSlotServiceConfig().getAllocateStrategy();
     }
 
     public CompletableFuture<List<SlotProfile>> request(Map<String, String> tags) {
@@ -210,8 +216,7 @@ public class ResourceRequestHandler {
         List<WorkerProfile> workerProfiles =
                 Arrays.asList(registerWorker.values().toArray(new WorkerProfile[0]));
 
-        // Check if there are still unassigned slots
-        Optional<WorkerProfile> workerProfile =
+        List<WorkerProfile> collect =
                 workerProfiles.stream()
                         .filter(
                                 worker ->
@@ -220,12 +225,28 @@ public class ResourceRequestHandler {
                                                         slot ->
                                                                 slot.getResourceProfile()
                                                                         .enoughThan(r)))
-                        .min(
-                                (w1, w2) -> {
-                                    double usage1 = calculateSlotUsage(w1);
-                                    double usage2 = calculateSlotUsage(w2);
-                                    return Double.compare(usage1, usage2);
-                                });
+                        .collect(Collectors.toList());
+        Optional<WorkerProfile> workerProfile;
+        if (allocateStrategy == AllocateStrategy.SYSTEM_LOAD) {
+            workerProfile =
+                    collect.stream()
+                            .min(
+                                    (w1, w2) -> {
+                                        double systemLoad1 = w1.getSystemLoad();
+                                        double systemLoad2 = w2.getSystemLoad();
+                                        return Double.compare(systemLoad1, systemLoad2);
+                                    });
+        } else {
+            // 默认使用slot使用率策略，slot使用率越低，优先级越高
+            workerProfile =
+                    collect.stream()
+                            .min(
+                                    (w1, w2) -> {
+                                        double usage1 = calculateSlotUsage(w1);
+                                        double usage2 = calculateSlotUsage(w2);
+                                        return Double.compare(usage1, usage2);
+                                    });
+        }
 
         if (!workerProfile.isPresent()) {
             // Check if there are still unassigned resources
