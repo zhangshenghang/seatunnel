@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.connectors.seatunnel.clickhouse.util;
 
+import com.clickhouse.client.*;
 import org.apache.seatunnel.api.common.SeaTunnelAPIErrorCode;
 import org.apache.seatunnel.common.exception.CommonErrorCodeDeprecated;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.exception.ClickhouseConnectorErrorCode;
@@ -24,21 +25,15 @@ import org.apache.seatunnel.connectors.seatunnel.clickhouse.exception.Clickhouse
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.shard.Shard;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.sink.file.ClickhouseTable;
 
-import com.clickhouse.client.ClickHouseClient;
-import com.clickhouse.client.ClickHouseException;
-import com.clickhouse.client.ClickHouseFormat;
-import com.clickhouse.client.ClickHouseNode;
-import com.clickhouse.client.ClickHouseRecord;
-import com.clickhouse.client.ClickHouseRequest;
-import com.clickhouse.client.ClickHouseResponse;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 @SuppressWarnings("magicnumber")
 public class ClickhouseProxy {
@@ -153,6 +148,21 @@ public class ClickhouseProxy {
         return schema;
     }
 
+
+    public  List< ClickHouseColumn > getClickHouseColumns(
+          String table) {
+        String sql = "desc " + table;
+        try (ClickHouseResponse response = this.clickhouseRequest.query(sql).executeAndWait()) {
+           return response.getColumns();
+
+        } catch (ClickHouseException e) {
+            throw new ClickhouseConnectorException(
+                    CommonErrorCodeDeprecated.TABLE_SCHEMA_GET_FAILED,
+                    "Cannot get table schema from clickhouse",
+                    e);
+        }
+    }
+
     /**
      * Get the shard of the given cluster.
      *
@@ -264,6 +274,133 @@ public class ClickhouseProxy {
             return ddl.replaceAll("ReplicatedMergeTree(\\([^\\)]*\\))", "MergeTree()");
         } else {
             return ddl;
+        }
+    }
+
+    public boolean tableExists(String database, String table) {
+        String sql =
+                String.format(
+                        "select count(1) from system.tables where database = '%s' and name = '%s'",
+                        database, table);
+        try (ClickHouseResponse response = clickhouseRequest.query(sql).executeAndWait()) {
+            return response.firstRecord().getValue(0).asInteger() > 0;
+        } catch (ClickHouseException e) {
+            throw new ClickhouseConnectorException(
+                    SeaTunnelAPIErrorCode.TABLE_NOT_EXISTED,
+                    "Cannot get table from clickhouse",
+                    e);
+        }
+    }
+
+    public List<String> listDatabases() {
+        String sql = "select distinct database from system.tables";
+        try (ClickHouseResponse response = clickhouseRequest.query(sql).executeAndWait()) {
+            Iterable<ClickHouseRecord> records = response.records();
+            return StreamSupport.stream(records.spliterator(), false)
+                    .map(r -> r.getValue(0).asString())
+                    .collect(Collectors.toList());
+        } catch (ClickHouseException e) {
+            throw new ClickhouseConnectorException(
+                    SeaTunnelAPIErrorCode.LIST_DATABASES_FAILED,
+                    "Cannot list databases from clickhouse",
+                    e);
+        }
+    }
+
+    public List<String> listTable(String database){
+        String sql = "SELECT name FROM system.tables WHERE database = '"+database+"'";
+        try (ClickHouseResponse response = clickhouseRequest.query(sql).executeAndWait()) {
+            Iterable<ClickHouseRecord> records = response.records();
+            return StreamSupport.stream(records.spliterator(), false)
+                    .map(r -> r.getValue(0).asString())
+                    .collect(Collectors.toList());
+        } catch (ClickHouseException e) {
+            throw new ClickhouseConnectorException(
+                    SeaTunnelAPIErrorCode.LIST_TABLES_FAILED,
+                    "Cannot list tables from clickhouse",
+                    e);
+        }
+    }
+
+    public void executeSql(String sql){
+        try {
+            clickhouseRequest.write()
+                    .format(ClickHouseFormat.RowBinaryWithNamesAndTypes)
+                    .query(sql).execute().get();
+        } catch (InterruptedException|ExecutionException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public boolean createTable(String database,String table){
+        //TODO 创建表
+        try {
+            clickhouseRequest.write()
+                    .format(ClickHouseFormat.RowBinaryWithNamesAndTypes)
+                    .query("CREATE TABLE IF NOT EXISTS "+database+"."+table+" (pk_id Int64, name String, score Int32) ENGINE = MergeTree() ORDER BY pk_id;").execute().get();
+            return true;
+        } catch (InterruptedException|ExecutionException e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    public boolean isExistsData(String tableName) throws ExecutionException, InterruptedException {
+        // 定义查询数据的SQL语句
+        String queryDataSql = "SELECT count(*) FROM "+ tableName;
+        try (ClickHouseResponse response = clickhouseRequest.query(queryDataSql).executeAndWait()) {
+            return response.firstRecord().getValue(0).asInteger() > 0;
+        } catch (ClickHouseException e) {
+            throw new ClickhouseConnectorException(
+                    SeaTunnelAPIErrorCode.TABLE_NOT_EXISTED,
+                    "Cannot get table from clickhouse",
+                    e);
+        }
+    }
+
+    public boolean dropTable(String database,String table){
+        //TODO 创建表
+        try {
+            clickhouseRequest.write()
+                    .format(ClickHouseFormat.RowBinaryWithNamesAndTypes)
+                    .query("DROP TABLE IF EXISTS "+database+"."+table).execute().get();
+            return true;
+        } catch (InterruptedException|ExecutionException e) {
+            return false;
+        }
+    }
+
+    public boolean truncateTable(String database,String table){
+        //TODO
+        try {
+            clickhouseRequest.write()
+                    .format(ClickHouseFormat.RowBinaryWithNamesAndTypes)
+                    .query("TRUNCATE TABLE "+database+"."+table).execute().get();
+            return true;
+        } catch (InterruptedException|ExecutionException e) {
+            return false;
+        }
+    }
+
+    public boolean createDatabase(String database){
+        try {
+            clickhouseRequest.write()
+                    .format(ClickHouseFormat.RowBinaryWithNamesAndTypes)
+                    .query("CREATE DATABASE IF NOT EXISTS "+database).execute().get();
+            return true;
+        } catch (InterruptedException|ExecutionException e) {
+            return false;
+        }
+    }
+
+    public boolean dropDatabase(String database){
+        try {
+            clickhouseRequest.write()
+                    .format(ClickHouseFormat.RowBinaryWithNamesAndTypes)
+                    .query("DROP DATABASE IF EXISTS "+database).execute().get();
+            return true;
+        } catch (InterruptedException|ExecutionException e) {
+            return false;
         }
     }
 

@@ -66,87 +66,11 @@ public class ClickhouseSinkFactory implements TableSinkFactory {
     }
 
     @Override
-    public TableSink<SeaTunnelRow, ClickhouseSinkState, CKCommitInfo, CKAggCommitInfo> createSink(
+    public TableSink createSink(
             TableSinkFactoryContext context) {
         ReadonlyConfig readonlyConfig = context.getOptions();
         CatalogTable catalogTable = context.getCatalogTable();
-        List<ClickHouseNode> nodes = ClickhouseUtil.createNodes(readonlyConfig);
-        Properties clickhouseProperties = new Properties();
-        readonlyConfig
-                .get(CLICKHOUSE_CONFIG)
-                .forEach((key, value) -> clickhouseProperties.put(key, String.valueOf(value)));
-
-        clickhouseProperties.put("user", readonlyConfig.get(USERNAME));
-        clickhouseProperties.put("password", readonlyConfig.get(PASSWORD));
-        ClickhouseProxy proxy = new ClickhouseProxy(nodes.get(0));
-        try {
-            Map<String, String> tableSchema =
-                    proxy.getClickhouseTableSchema(readonlyConfig.get(TABLE));
-            String shardKey = null;
-            String shardKeyType = null;
-            ClickhouseTable table =
-                    proxy.getClickhouseTable(
-                            readonlyConfig.get(DATABASE), readonlyConfig.get(TABLE));
-            if (readonlyConfig.get(SPLIT_MODE)) {
-                if (!"Distributed".equals(table.getEngine())) {
-                    throw new ClickhouseConnectorException(
-                            CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT,
-                            "split mode only support table which engine is "
-                                    + "'Distributed' engine at now");
-                }
-                if (readonlyConfig.getOptional(SHARDING_KEY).isPresent()) {
-                    shardKey = readonlyConfig.get(SHARDING_KEY);
-                    shardKeyType = tableSchema.get(shardKey);
-                }
-            }
-            ShardMetadata metadata =
-                    new ShardMetadata(
-                            shardKey,
-                            shardKeyType,
-                            table.getSortingKey(),
-                            readonlyConfig.get(DATABASE),
-                            readonlyConfig.get(TABLE),
-                            table.getEngine(),
-                            readonlyConfig.get(SPLIT_MODE),
-                            new Shard(1, 1, nodes.get(0)),
-                            readonlyConfig.get(USERNAME),
-                            readonlyConfig.get(PASSWORD));
-            proxy.close();
-            String[] primaryKeys = null;
-            if (readonlyConfig.getOptional(PRIMARY_KEY).isPresent()) {
-                String primaryKey = readonlyConfig.get(PRIMARY_KEY);
-                if (primaryKey == null || primaryKey.trim().isEmpty()) {
-                    throw new ClickhouseConnectorException(
-                            CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT,
-                            "primary_key can not be empty");
-                }
-                if (shardKey != null && !Objects.equals(primaryKey, shardKey)) {
-                    throw new ClickhouseConnectorException(
-                            CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT,
-                            "sharding_key and primary_key must be consistent to ensure correct processing of cdc events");
-                }
-                primaryKeys = primaryKey.replaceAll("\\s+", "").split(",");
-            }
-            boolean supportUpsert = readonlyConfig.get(SUPPORT_UPSERT);
-            boolean allowExperimentalLightweightDelete =
-                    readonlyConfig.get(ALLOW_EXPERIMENTAL_LIGHTWEIGHT_DELETE);
-
-            ReaderOption option =
-                    ReaderOption.builder()
-                            .shardMetadata(metadata)
-                            .properties(clickhouseProperties)
-                            .seaTunnelRowType(catalogTable.getSeaTunnelRowType())
-                            .tableEngine(table.getEngine())
-                            .tableSchema(tableSchema)
-                            .bulkSize(readonlyConfig.get(BULK_SIZE))
-                            .primaryKeys(primaryKeys)
-                            .supportUpsert(supportUpsert)
-                            .allowExperimentalLightweightDelete(allowExperimentalLightweightDelete)
-                            .build();
-            return () -> new ClickhouseSink(option, catalogTable);
-        } finally {
-            proxy.close();
-        }
+        return () -> new ClickhouseSink( catalogTable ,readonlyConfig);
     }
 
     @Override
