@@ -35,7 +35,6 @@ import java.util.Map;
  * Used to describe the status of the current Worker, including address and resource assign status
  */
 @Data
-@AllArgsConstructor
 public class WorkerProfile implements IdentifiedDataSerializable {
 
     private Address address;
@@ -57,6 +56,16 @@ public class WorkerProfile implements IdentifiedDataSerializable {
     public WorkerProfile(Address address) {
         this.address = address;
         this.unassignedResource = new ResourceProfile();
+    }
+
+    public WorkerProfile(Address address, ResourceProfile profile, ResourceProfile unassignedResource, boolean dynamicSlot, SlotProfile[] assignedSlots, SlotProfile[] unassignedSlots, Map<String, String> attributes) {
+        this.address = address;
+        this.profile = profile;
+        this.unassignedResource = unassignedResource;
+        this.dynamicSlot = dynamicSlot;
+        this.assignedSlots = assignedSlots;
+        this.unassignedSlots = unassignedSlots;
+        this.attributes = attributes;
     }
 
     public WorkerProfile() {
