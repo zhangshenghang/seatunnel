@@ -24,26 +24,8 @@ import org.apache.seatunnel.api.table.connector.TableSink;
 import org.apache.seatunnel.api.table.factory.Factory;
 import org.apache.seatunnel.api.table.factory.TableSinkFactory;
 import org.apache.seatunnel.api.table.factory.TableSinkFactoryContext;
-import org.apache.seatunnel.api.table.type.SeaTunnelRow;
-import org.apache.seatunnel.common.exception.CommonErrorCodeDeprecated;
-import org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ReaderOption;
-import org.apache.seatunnel.connectors.seatunnel.clickhouse.exception.ClickhouseConnectorException;
-import org.apache.seatunnel.connectors.seatunnel.clickhouse.shard.Shard;
-import org.apache.seatunnel.connectors.seatunnel.clickhouse.shard.ShardMetadata;
-import org.apache.seatunnel.connectors.seatunnel.clickhouse.sink.file.ClickhouseTable;
-import org.apache.seatunnel.connectors.seatunnel.clickhouse.state.CKAggCommitInfo;
-import org.apache.seatunnel.connectors.seatunnel.clickhouse.state.CKCommitInfo;
-import org.apache.seatunnel.connectors.seatunnel.clickhouse.state.ClickhouseSinkState;
-import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.ClickhouseProxy;
-import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.ClickhouseUtil;
 
-import com.clickhouse.client.ClickHouseNode;
 import com.google.auto.service.AutoService;
-
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Properties;
 
 import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.ALLOW_EXPERIMENTAL_LIGHTWEIGHT_DELETE;
 import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.BULK_SIZE;
@@ -66,11 +48,10 @@ public class ClickhouseSinkFactory implements TableSinkFactory {
     }
 
     @Override
-    public TableSink createSink(
-            TableSinkFactoryContext context) {
+    public TableSink createSink(TableSinkFactoryContext context) {
         ReadonlyConfig readonlyConfig = context.getOptions();
         CatalogTable catalogTable = context.getCatalogTable();
-        return () -> new ClickhouseSink( catalogTable ,readonlyConfig);
+        return () -> new ClickhouseSink(catalogTable, readonlyConfig);
     }
 
     @Override

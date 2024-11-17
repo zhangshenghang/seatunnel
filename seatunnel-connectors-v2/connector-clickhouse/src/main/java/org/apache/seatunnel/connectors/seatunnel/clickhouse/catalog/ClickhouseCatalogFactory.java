@@ -17,7 +17,6 @@
 
 package org.apache.seatunnel.connectors.seatunnel.clickhouse.catalog;
 
-import com.google.auto.service.AutoService;
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.configuration.util.OptionRule;
 import org.apache.seatunnel.api.table.catalog.Catalog;
@@ -25,13 +24,16 @@ import org.apache.seatunnel.api.table.factory.CatalogFactory;
 import org.apache.seatunnel.api.table.factory.Factory;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig;
 
+import com.google.auto.service.AutoService;
+
 @AutoService(Factory.class)
 public class ClickhouseCatalogFactory implements CatalogFactory {
+
     public static final String IDENTIFIER = "clickhouse";
 
     @Override
     public Catalog createCatalog(String catalogName, ReadonlyConfig options) {
-        return null;
+        return new ClickhouseCatalog(options, catalogName);
     }
 
     @Override
@@ -41,10 +43,11 @@ public class ClickhouseCatalogFactory implements CatalogFactory {
 
     @Override
     public OptionRule optionRule() {
-        // TODO 补充 option
         return OptionRule.builder()
                 .required(ClickhouseConfig.HOST)
                 .required(ClickhouseConfig.DATABASE)
+                .required(ClickhouseConfig.USERNAME)
+                .required(ClickhouseConfig.PASSWORD)
                 .build();
     }
 }

@@ -27,7 +27,9 @@ import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
 import org.apache.seatunnel.e2e.common.TestResource;
 import org.apache.seatunnel.e2e.common.TestSuiteBase;
+import org.apache.seatunnel.e2e.common.container.EngineType;
 import org.apache.seatunnel.e2e.common.container.TestContainer;
+import org.apache.seatunnel.e2e.common.junit.DisabledOnContainer;
 import org.apache.seatunnel.e2e.common.util.ContainerUtil;
 
 import org.awaitility.Awaitility;
@@ -105,6 +107,21 @@ public class ClickhouseIT extends TestSuiteBase implements TestResource {
     public void testSourceParallelism(TestContainer container) throws Exception {
         Container.ExecResult execResult = container.executeJob("/clickhouse_to_console.conf");
         Assertions.assertEquals(0, execResult.getExitCode());
+    }
+
+    @TestTemplate
+    @DisabledOnContainer(
+            value = {},
+            type = {EngineType.SPARK, EngineType.FLINK})
+    public void clickhouseWithCreateSchemaWhenNotExist(TestContainer container) throws Exception {
+        String tableName = "default.sink_table_for_schema";
+        Container.ExecResult execResult = container.executeJob("/clickhouse_with_create_schema_when_not_exist.conf");
+        Assertions.assertEquals(0, execResult.getExitCode());
+        Assertions.assertEquals(100, countData(tableName));
+        execResult = container.executeJob("/clickhouse_with_create_schema_when_not_exist.conf");
+        Assertions.assertEquals(0, execResult.getExitCode());
+        Assertions.assertEquals(200, countData(tableName));
+        dropTable(tableName);
     }
 
     @BeforeAll
@@ -192,6 +209,29 @@ public class ClickhouseIT extends TestSuiteBase implements TestResource {
                     "array inject error, not supported data type: " + value.getClass());
         }
         return connection.createArrayOf(sqlType, elements);
+    }
+
+    private int countData(String tableName){
+        try {
+            String sql = "select count(1) from " + tableName;
+            ResultSet resultSet = this.connection.createStatement().executeQuery(sql);
+            if (resultSet.next()) {
+                return resultSet.getInt(1);
+            } else {
+                return -1;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void dropTable(String tableName) {
+        try {
+            Statement statement = this.connection.createStatement();
+            statement.execute("drop table if exists " + tableName);
+        } catch (SQLException e) {
+            throw new RuntimeException("Drop table failed!", e);
+        }
     }
 
     private void batchInsertData() {

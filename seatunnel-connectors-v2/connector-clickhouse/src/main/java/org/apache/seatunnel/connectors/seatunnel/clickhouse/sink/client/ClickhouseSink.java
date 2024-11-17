@@ -17,18 +17,22 @@
 
 package org.apache.seatunnel.connectors.seatunnel.clickhouse.sink.client;
 
-import com.clickhouse.client.ClickHouseNode;
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.serialization.DefaultSerializer;
 import org.apache.seatunnel.api.serialization.Serializer;
-import org.apache.seatunnel.api.sink.*;
-import org.apache.seatunnel.api.table.catalog.Catalog;
+import org.apache.seatunnel.api.sink.DataSaveMode;
+import org.apache.seatunnel.api.sink.DefaultSaveModeHandler;
+import org.apache.seatunnel.api.sink.SaveModeHandler;
+import org.apache.seatunnel.api.sink.SchemaSaveMode;
+import org.apache.seatunnel.api.sink.SeaTunnelSink;
+import org.apache.seatunnel.api.sink.SinkWriter;
+import org.apache.seatunnel.api.sink.SupportSaveMode;
 import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.api.table.catalog.TablePath;
-import org.apache.seatunnel.api.table.factory.TableSinkFactoryContext;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.common.exception.CommonErrorCodeDeprecated;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.catalog.ClickhouseCatalog;
+import org.apache.seatunnel.connectors.seatunnel.clickhouse.catalog.ClickhouseCatalogFactory;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ReaderOption;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.exception.ClickhouseConnectorException;
@@ -41,18 +45,36 @@ import org.apache.seatunnel.connectors.seatunnel.clickhouse.state.ClickhouseSink
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.ClickhouseProxy;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.ClickhouseUtil;
 
-import java.io.IOException;
-import java.util.*;
+import com.clickhouse.client.ClickHouseNode;
 
-import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.*;
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Properties;
+
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.ALLOW_EXPERIMENTAL_LIGHTWEIGHT_DELETE;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.BULK_SIZE;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.CLICKHOUSE_CONFIG;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.CUSTOM_SQL;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.DATABASE;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.PASSWORD;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.PRIMARY_KEY;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.SHARDING_KEY;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.SPLIT_MODE;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.SUPPORT_UPSERT;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.TABLE;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.USERNAME;
 
 public class ClickhouseSink
-        implements SeaTunnelSink<SeaTunnelRow, ClickhouseSinkState, CKCommitInfo, CKAggCommitInfo>, SupportSaveMode {
+        implements SeaTunnelSink<SeaTunnelRow, ClickhouseSinkState, CKCommitInfo, CKAggCommitInfo>,
+                SupportSaveMode {
 
     private ReaderOption option;
     private CatalogTable catalogTable;
 
-    private  ReadonlyConfig readonlyConfig;
+    private ReadonlyConfig readonlyConfig;
 
     public ClickhouseSink(CatalogTable catalogTable, ReadonlyConfig readonlyConfig) {
         this.catalogTable = catalogTable;
@@ -77,69 +99,66 @@ public class ClickhouseSink
         clickhouseProperties.put("password", readonlyConfig.get(PASSWORD));
         ClickhouseProxy proxy = new ClickhouseProxy(nodes.get(0));
 
-            Map<String, String> tableSchema =
-                    proxy.getClickhouseTableSchema(readonlyConfig.get(TABLE));
-            String shardKey = null;
-            String shardKeyType = null;
-            ClickhouseTable table =
-                    proxy.getClickhouseTable(
-                            readonlyConfig.get(DATABASE), readonlyConfig.get(TABLE));
-            if (readonlyConfig.get(SPLIT_MODE)) {
-                if (!"Distributed".equals(table.getEngine())) {
-                    throw new ClickhouseConnectorException(
-                            CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT,
-                            "split mode only support table which engine is "
-                                    + "'Distributed' engine at now");
-                }
-                if (readonlyConfig.getOptional(SHARDING_KEY).isPresent()) {
-                    shardKey = readonlyConfig.get(SHARDING_KEY);
-                    shardKeyType = tableSchema.get(shardKey);
-                }
+        Map<String, String> tableSchema = proxy.getClickhouseTableSchema(readonlyConfig.get(TABLE));
+        String shardKey = null;
+        String shardKeyType = null;
+        ClickhouseTable table =
+                proxy.getClickhouseTable(readonlyConfig.get(DATABASE), readonlyConfig.get(TABLE));
+        if (readonlyConfig.get(SPLIT_MODE)) {
+            if (!"Distributed".equals(table.getEngine())) {
+                throw new ClickhouseConnectorException(
+                        CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT,
+                        "split mode only support table which engine is "
+                                + "'Distributed' engine at now");
             }
-            ShardMetadata metadata =
-                    new ShardMetadata(
-                            shardKey,
-                            shardKeyType,
-                            table.getSortingKey(),
-                            readonlyConfig.get(DATABASE),
-                            readonlyConfig.get(TABLE),
-                            table.getEngine(),
-                            readonlyConfig.get(SPLIT_MODE),
-                            new Shard(1, 1, nodes.get(0)),
-                            readonlyConfig.get(USERNAME),
-                            readonlyConfig.get(PASSWORD));
-            proxy.close();
-            String[] primaryKeys = null;
-            if (readonlyConfig.getOptional(PRIMARY_KEY).isPresent()) {
-                String primaryKey = readonlyConfig.get(PRIMARY_KEY);
-                if (primaryKey == null || primaryKey.trim().isEmpty()) {
-                    throw new ClickhouseConnectorException(
-                            CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT,
-                            "primary_key can not be empty");
-                }
-                if (shardKey != null && !Objects.equals(primaryKey, shardKey)) {
-                    throw new ClickhouseConnectorException(
-                            CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT,
-                            "sharding_key and primary_key must be consistent to ensure correct processing of cdc events");
-                }
-                primaryKeys = primaryKey.replaceAll("\\s+", "").split(",");
+            if (readonlyConfig.getOptional(SHARDING_KEY).isPresent()) {
+                shardKey = readonlyConfig.get(SHARDING_KEY);
+                shardKeyType = tableSchema.get(shardKey);
             }
-            boolean supportUpsert = readonlyConfig.get(SUPPORT_UPSERT);
-            boolean allowExperimentalLightweightDelete =
-                    readonlyConfig.get(ALLOW_EXPERIMENTAL_LIGHTWEIGHT_DELETE);
+        }
+        ShardMetadata metadata =
+                new ShardMetadata(
+                        shardKey,
+                        shardKeyType,
+                        table.getSortingKey(),
+                        readonlyConfig.get(DATABASE),
+                        readonlyConfig.get(TABLE),
+                        table.getEngine(),
+                        readonlyConfig.get(SPLIT_MODE),
+                        new Shard(1, 1, nodes.get(0)),
+                        readonlyConfig.get(USERNAME),
+                        readonlyConfig.get(PASSWORD));
+        proxy.close();
+        String[] primaryKeys = null;
+        if (readonlyConfig.getOptional(PRIMARY_KEY).isPresent()) {
+            String primaryKey = readonlyConfig.get(PRIMARY_KEY);
+            if (primaryKey == null || primaryKey.trim().isEmpty()) {
+                throw new ClickhouseConnectorException(
+                        CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT, "primary_key can not be empty");
+            }
+            if (shardKey != null && !Objects.equals(primaryKey, shardKey)) {
+                throw new ClickhouseConnectorException(
+                        CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT,
+                        "sharding_key and primary_key must be consistent to ensure correct processing of cdc events");
+            }
+            primaryKeys = primaryKey.replaceAll("\\s+", "").split(",");
+        }
+        boolean supportUpsert = readonlyConfig.get(SUPPORT_UPSERT);
+        boolean allowExperimentalLightweightDelete =
+                readonlyConfig.get(ALLOW_EXPERIMENTAL_LIGHTWEIGHT_DELETE);
 
-            ReaderOption option =
-                    ReaderOption.builder()
-                            .shardMetadata(metadata)
-                            .properties(clickhouseProperties)
-                            .seaTunnelRowType(catalogTable.getSeaTunnelRowType())
-                            .tableEngine(table.getEngine())
-                            .tableSchema(tableSchema)
-                            .bulkSize(readonlyConfig.get(BULK_SIZE))
-                            .primaryKeys(primaryKeys)
-                            .supportUpsert(supportUpsert)
-                            .allowExperimentalLightweightDelete(allowExperimentalLightweightDelete)
-                            .build();
+        ReaderOption option =
+                ReaderOption.builder()
+                        .shardMetadata(metadata)
+                        .properties(clickhouseProperties)
+                        .seaTunnelRowType(catalogTable.getSeaTunnelRowType())
+                        .tableEngine(table.getEngine())
+                        .tableSchema(tableSchema)
+                        .bulkSize(readonlyConfig.get(BULK_SIZE))
+                        .primaryKeys(primaryKeys)
+                        .supportUpsert(supportUpsert)
+                        .allowExperimentalLightweightDelete(allowExperimentalLightweightDelete)
+                        .build();
         return new ClickhouseSinkWriter(option, context);
     }
 
@@ -161,11 +180,9 @@ public class ClickhouseSink
 
     @Override
     public Optional<SaveModeHandler> getSaveModeHandler() {
-        TablePath tablePath =
-                TablePath.of(
-                        readonlyConfig.get(DATABASE),
-                        readonlyConfig.get(TABLE));
-        ClickhouseCatalog clickhouseCatalog = new ClickhouseCatalog(readonlyConfig, "clickhouse");
+        TablePath tablePath = TablePath.of(readonlyConfig.get(DATABASE), readonlyConfig.get(TABLE));
+        ClickhouseCatalog clickhouseCatalog =
+                new ClickhouseCatalog(readonlyConfig, ClickhouseCatalogFactory.IDENTIFIER);
         SchemaSaveMode schemaSaveMode = readonlyConfig.get(ClickhouseConfig.SCHEMA_SAVE_MODE);
         DataSaveMode dataSaveMode = readonlyConfig.get(ClickhouseConfig.DATA_SAVE_MODE);
         return Optional.of(

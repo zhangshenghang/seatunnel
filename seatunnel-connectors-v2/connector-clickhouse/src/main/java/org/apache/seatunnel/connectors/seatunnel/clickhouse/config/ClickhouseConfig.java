@@ -214,17 +214,15 @@ public class ClickhouseConfig {
                                     + ",\n"
                                     + SaveModePlaceHolder.ROWTYPE_FIELDS.getPlaceHolder()
                                     + "\n"
-                                    + ") ENGINE=OLAP\n"
-                                    + " PRIMARY KEY ("
+                                    + ") ENGINE = MergeTree()\n"
+                                    + "ORDER BY ("
                                     + SaveModePlaceHolder.ROWTYPE_PRIMARY_KEY.getPlaceHolder()
                                     + ")\n"
-                                    + "DISTRIBUTED BY HASH ("
+                                    + "PRIMARY KEY ("
                                     + SaveModePlaceHolder.ROWTYPE_PRIMARY_KEY.getPlaceHolder()
-                                    + ")"
-                                    + "PROPERTIES (\n"
-                                    + "    \"replication_num\" = \"1\" \n"
-                                    + ")")
+                                    + ")\n"
+                                    + "SETTINGS\n"
+                                    + "    index_granularity = 8192;")
                     .withDescription(
-                            "Create table statement template, used to create StarRocks table");
-
+                            "Create table statement template, used to create Clickhouse table");
 }
