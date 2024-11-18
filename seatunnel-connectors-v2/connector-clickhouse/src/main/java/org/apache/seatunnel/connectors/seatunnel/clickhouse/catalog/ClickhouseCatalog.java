@@ -23,6 +23,7 @@ import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.api.table.catalog.PhysicalColumn;
 import org.apache.seatunnel.api.table.catalog.PreviewResult;
 import org.apache.seatunnel.api.table.catalog.PrimaryKey;
+import org.apache.seatunnel.api.table.catalog.SQLPreviewResult;
 import org.apache.seatunnel.api.table.catalog.TableIdentifier;
 import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.api.table.catalog.TableSchema;
@@ -31,17 +32,16 @@ import org.apache.seatunnel.api.table.catalog.exception.DatabaseAlreadyExistExce
 import org.apache.seatunnel.api.table.catalog.exception.DatabaseNotExistException;
 import org.apache.seatunnel.api.table.catalog.exception.TableAlreadyExistException;
 import org.apache.seatunnel.api.table.catalog.exception.TableNotExistException;
+import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.ClickhouseCatalogUtil;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.ClickhouseProxy;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.ClickhouseUtil;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.TypeConvertUtil;
 
 import org.apache.commons.lang3.StringUtils;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.clickhouse.client.ClickHouseColumn;
 import com.clickhouse.client.ClickHouseNode;
+import com.google.common.base.Preconditions;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Collections;
@@ -53,6 +53,7 @@ import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 
 import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.CLICKHOUSE_CONFIG;
+import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.HOST;
 import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.PASSWORD;
 import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.SAVE_MODE_CREATE_TEMPLATE;
 import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig.USERNAME;
@@ -67,7 +68,6 @@ public class ClickhouseCatalog implements Catalog {
     private final String template;
 
     private String catalogName;
-    private static final Logger LOG = LoggerFactory.getLogger(ClickhouseCatalog.class);
 
     public ClickhouseCatalog(ReadonlyConfig readonlyConfig, String catalogName) {
         this.readonlyConfig = readonlyConfig;
@@ -197,11 +197,10 @@ public class ClickhouseCatalog implements Catalog {
     private Map<String, String> buildConnectorOptions(TablePath tablePath) {
         Map<String, String> options = new HashMap<>(8);
         options.put("connector", "clickhouse");
-        // TODO
-        //        options.put("url", baseUrl + tablePath.getDatabaseName());
-        //        options.put("table-name", tablePath.getFullName());
-        //        options.put("username", username);
-        //        options.put("password", pwd);
+        options.put("host", readonlyConfig.get(HOST));
+        options.put("database", tablePath.getDatabaseName());
+        options.put("username", readonlyConfig.get(USERNAME));
+        options.put("password", readonlyConfig.get(PASSWORD));
         return options;
     }
 
@@ -212,7 +211,6 @@ public class ClickhouseCatalog implements Catalog {
 
     @Override
     public void open() throws CatalogException {
-
         List<ClickHouseNode> nodes = ClickhouseUtil.createNodes(readonlyConfig);
         Properties clickhouseProperties = new Properties();
         readonlyConfig
@@ -225,9 +223,7 @@ public class ClickhouseCatalog implements Catalog {
     }
 
     @Override
-    public void close() throws CatalogException {
-        System.out.println("close clickhouse catalog");
-    }
+    public void close() throws CatalogException {}
 
     @Override
     public String name() {
@@ -237,7 +233,6 @@ public class ClickhouseCatalog implements Catalog {
     @Override
     public boolean databaseExists(String databaseName) throws CatalogException {
         checkArgument(StringUtils.isNotBlank(databaseName));
-
         return listDatabases().contains(databaseName);
     }
 
@@ -249,32 +244,30 @@ public class ClickhouseCatalog implements Catalog {
     @Override
     public PreviewResult previewAction(
             ActionType actionType, TablePath tablePath, Optional<CatalogTable> catalogTable) {
-        //        if (actionType == ActionType.CREATE_TABLE) {
-        //            Preconditions.checkArgument(catalogTable.isPresent(), "CatalogTable cannot be
-        // null");
-        //            return new SQLPreviewResult(
-        //                    StarRocksSaveModeUtil.getCreateTableSql(
-        //                            template,
-        //                            tablePath.getDatabaseName(),
-        //                            tablePath.getTableName(),
-        //                            catalogTable.get().getTableSchema()));
-        //        } else if (actionType == ActionType.DROP_TABLE) {
-        //            return new SQLPreviewResult(StarRocksSaveModeUtil.getDropTableSql(tablePath,
-        // true));
-        //        } else if (actionType == ActionType.TRUNCATE_TABLE) {
-        //            return new
-        // SQLPreviewResult(StarRocksSaveModeUtil.getTruncateTableSql(tablePath));
-        //        } else if (actionType == ActionType.CREATE_DATABASE) {
-        //            return new SQLPreviewResult(
-        //
-        // StarRocksSaveModeUtil.getCreateDatabaseSql(tablePath.getDatabaseName(), true));
-        //        } else if (actionType == ActionType.DROP_DATABASE) {
-        //            return new SQLPreviewResult(
-        //                    "DROP DATABASE IF EXISTS `" + tablePath.getDatabaseName() + "`");
-        //        } else {
-        //            throw new UnsupportedOperationException("Unsupported action type: " +
-        // actionType);
-        //        }
-        return null;
+        if (actionType == ActionType.CREATE_TABLE) {
+            Preconditions.checkArgument(catalogTable.isPresent(), "CatalogTable cannot be null");
+            return new SQLPreviewResult(
+                    ClickhouseCatalogUtil.getCreateTableSql(
+                            template,
+                            tablePath.getDatabaseName(),
+                            tablePath.getTableName(),
+                            catalogTable.get().getTableSchema()));
+        } else if (actionType == ActionType.DROP_TABLE) {
+            return new SQLPreviewResult(
+                    ClickhouseCatalogUtil.getDropTableSql(
+                            tablePath.getDatabaseName(), tablePath.getTableName()));
+        } else if (actionType == ActionType.TRUNCATE_TABLE) {
+            return new SQLPreviewResult(
+                    ClickhouseCatalogUtil.getTruncateTableSql(
+                            tablePath.getDatabaseName(), tablePath.getTableName()));
+        } else if (actionType == ActionType.CREATE_DATABASE) {
+            return new SQLPreviewResult(
+                    ClickhouseCatalogUtil.getCreateDatabaseSql(tablePath.getDatabaseName()));
+        } else if (actionType == ActionType.DROP_DATABASE) {
+            return new SQLPreviewResult(
+                    ClickhouseCatalogUtil.getDropDatabaseSql(tablePath.getDatabaseName()));
+        } else {
+            throw new UnsupportedOperationException("Unsupported action type: " + actionType);
+        }
     }
 }

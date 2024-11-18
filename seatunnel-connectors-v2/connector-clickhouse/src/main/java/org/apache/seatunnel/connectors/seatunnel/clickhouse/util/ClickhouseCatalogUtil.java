@@ -146,4 +146,20 @@ public class ClickhouseCatalogUtil {
                         ? ""
                         : "COMMENT '" + column.getComment() + "'");
     }
+
+    public static String getDropTableSql(String database, String table) {
+        return "DROP TABLE IF EXISTS " + database + "." + table;
+    }
+
+    public static String getTruncateTableSql(String database, String table) {
+        return "TRUNCATE TABLE " + database + "." + table;
+    }
+
+    public static String getCreateDatabaseSql(String database) {
+        return "CREATE DATABASE IF NOT EXISTS " + database;
+    }
+
+    public static String getDropDatabaseSql(String database) {
+        return "DROP DATABASE IF EXISTS " + database;
+    }
 }

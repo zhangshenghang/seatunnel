@@ -400,20 +400,19 @@ public class ClickhouseProxy {
     }
 
     public void dropTable(String database, String table) {
-        executeSql("DROP TABLE IF EXISTS " + database + "." + table);
+        executeSql(ClickhouseCatalogUtil.getDropTableSql(database, table));
     }
 
-    public void truncateTable(String database, String table)
-            throws ExecutionException, InterruptedException {
-        executeSql("TRUNCATE TABLE " + database + "." + table);
+    public void truncateTable(String database, String table) {
+        executeSql(ClickhouseCatalogUtil.getTruncateTableSql(database, table));
     }
 
     public void createDatabase(String database) {
-        executeSql("CREATE DATABASE IF NOT EXISTS " + database);
+        executeSql(ClickhouseCatalogUtil.getCreateDatabaseSql(database));
     }
 
     public void dropDatabase(String database) {
-        executeSql("DROP DATABASE IF EXISTS " + database);
+        executeSql(ClickhouseCatalogUtil.getDropDatabaseSql(database));
     }
 
     public void close() {

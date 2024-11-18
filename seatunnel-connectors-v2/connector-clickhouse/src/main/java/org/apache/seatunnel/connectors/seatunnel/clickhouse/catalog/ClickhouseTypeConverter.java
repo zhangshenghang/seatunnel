@@ -32,8 +32,6 @@ import org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseTyp
 import com.google.auto.service.AutoService;
 import lombok.extern.slf4j.Slf4j;
 
-import static org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseType.STRING;
-
 @Slf4j
 @AutoService(TypeConverter.class)
 public class ClickhouseTypeConverter
