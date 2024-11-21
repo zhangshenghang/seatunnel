@@ -14,17 +14,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.seatunnel.api.transform;
 
-package org.apache.seatunnel.connectors.cdc.base.config;
-
-import lombok.Data;
-
-import java.io.Serializable;
 import java.util.List;
 
-@Data
-public class JdbcSourceTableConfig implements Serializable {
-    private String table;
-    private List<String> primaryKeys;
-    private String snapshotSplitColumn;
+public interface SeaTunnelFlatMapTransform<T> extends SeaTunnelTransform<T> {
+
+    /**
+     * Transform input data to {@link this#getProducedCatalogTable().getSeaTunnelRowType()} types
+     * data.
+     *
+     * @param row the data need be transformed.
+     * @return transformed data.
+     */
+    List<T> flatMap(T row);
 }
