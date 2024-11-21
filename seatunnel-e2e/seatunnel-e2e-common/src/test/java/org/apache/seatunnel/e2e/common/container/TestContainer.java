@@ -24,13 +24,12 @@ import org.testcontainers.containers.Network;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.UUID;
 
 public interface TestContainer extends TestResource {
 
     Network NETWORK =
             Network.builder()
-                    .createNetworkCmdModifier(cmd -> cmd.withName("SEATUNNEL-" + UUID.randomUUID()))
+                    .createNetworkCmdModifier(cmd -> cmd.withName("SEATUNNEL"))
                     .enableIpv6(false)
                     .build();
 
@@ -80,4 +79,6 @@ public interface TestContainer extends TestResource {
     String getServerLogs();
 
     void copyFileToContainer(String path, String targetPath);
+
+    void copyAbsolutePathToContainer(String path, String targetPath);
 }

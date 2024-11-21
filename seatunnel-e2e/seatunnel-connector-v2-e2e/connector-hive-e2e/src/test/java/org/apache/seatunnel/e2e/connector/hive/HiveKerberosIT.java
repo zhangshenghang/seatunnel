@@ -17,7 +17,6 @@
 
 package org.apache.seatunnel.e2e.connector.hive;
 
-import lombok.extern.slf4j.Slf4j;
 import org.apache.seatunnel.common.utils.ExceptionUtils;
 import org.apache.seatunnel.e2e.common.TestResource;
 import org.apache.seatunnel.e2e.common.TestSuiteBase;
@@ -27,6 +26,7 @@ import org.apache.seatunnel.e2e.common.container.TestContainer;
 import org.apache.seatunnel.e2e.common.junit.DisabledOnContainer;
 import org.apache.seatunnel.e2e.common.junit.TestContainerExtension;
 import org.apache.seatunnel.e2e.common.util.ContainerUtil;
+
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
@@ -38,7 +38,8 @@ import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.utility.DockerLoggerFactory;
 
-import java.io.File;
+import lombok.extern.slf4j.Slf4j;
+
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -49,7 +50,6 @@ import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
-import static org.apache.seatunnel.e2e.common.container.TestContainer.NETWORK;
 import static org.awaitility.Awaitility.given;
 
 @DisabledOnContainer(
@@ -67,7 +67,8 @@ public class HiveKerberosIT extends TestSuiteBase implements TestResource {
 
     private static final String HMS_HOST = "metastore";
     private static final String HIVE_SERVER_HOST = "hiveserver2";
-    private GenericContainer<?> hbaseContainer;
+    private GenericContainer<?> kerberosContainer;
+    private static final String KERBEROS_IMAGE_NAME = "zhangshenghang/kerberos-server:1.0";
 
     private String hiveExeUrl() {
         return "https://repo1.maven.org/maven2/org/apache/hive/hive-exec/3.1.3/hive-exec-3.1.3.jar";
@@ -159,39 +160,45 @@ public class HiveKerberosIT extends TestSuiteBase implements TestResource {
     @BeforeAll
     @Override
     public void startUp() throws Exception {
-        hbaseContainer =
-                new GenericContainer<>("kerberos-server6:latest")
+
+        kerberosContainer =
+                new GenericContainer<>(KERBEROS_IMAGE_NAME)
                         .withNetwork(NETWORK)
-                        .withExposedPorts(88,749)
+                        .withExposedPorts(88, 749)
                         .withCreateContainerCmdModifier(cmd -> cmd.withHostName("kerberos"))
                         .withLogConsumer(
-                                new Slf4jLogConsumer(DockerLoggerFactory.getLogger("kerberos-server6:latest")));
-        hbaseContainer.setPortBindings(Arrays.asList("88/udp:88/udp", "749:749"));
-        Startables.deepStart(Stream.of(hbaseContainer)).join();
+                                new Slf4jLogConsumer(
+                                        DockerLoggerFactory.getLogger(KERBEROS_IMAGE_NAME)));
+        kerberosContainer.setPortBindings(Arrays.asList("88/udp:88/udp", "749:749"));
+        Startables.deepStart(Stream.of(kerberosContainer)).join();
+        log.info("Kerberos just started");
+
+        // Copy the keytab file from kerberos container to local
         given().ignoreExceptions()
-            .await()
-            .atMost(30, TimeUnit.SECONDS)
-            .pollDelay(Duration.ofSeconds(1L))
-            .untilAsserted(() -> hbaseContainer.copyFileFromContainer("/tmp/hive.keytab", "/tmp/hive.keytab"));
-
-
+                .await()
+                .atMost(30, TimeUnit.SECONDS)
+                .pollDelay(Duration.ofSeconds(1L))
+                .untilAsserted(
+                        () ->
+                                kerberosContainer.copyFileFromContainer(
+                                        "/tmp/hive.keytab", "/tmp/hive.keytab"));
 
         hmsContainer =
                 HiveContainer.hmsStandalone()
                         .withCreateContainerCmdModifier(cmd -> cmd.withName(HMS_HOST))
                         .withNetwork(NETWORK)
-                        .withFileSystemBind(ContainerUtil.getResourcesFile("/kerberos/krb5.conf").getPath(),
+                        .withFileSystemBind(
+                                ContainerUtil.getResourcesFile("/kerberos/krb5.conf").getPath(),
                                 "/etc/krb5.conf")
                         .withFileSystemBind("/tmp/hive.keytab", "/tmp/hive.keytab")
-                        .withFileSystemBind(ContainerUtil.getResourcesFile("/kerberos/hive-site.xml").getPath(),
+                        .withFileSystemBind(
+                                ContainerUtil.getResourcesFile("/kerberos/hive-site.xml").getPath(),
                                 "/opt/hive/conf/hive-site.xml")
-                        .withFileSystemBind(ContainerUtil.getResourcesFile("/kerberos/core-site.xml").getPath(),
-                                "/opt/hadoop/etc/hadoop/core-site.xml")
-                        .withFileSystemBind(ContainerUtil.getResourcesFile("/kerberos/core-site.xml").getPath(),
+                        .withFileSystemBind(
+                                ContainerUtil.getResourcesFile("/kerberos/core-site.xml").getPath(),
                                 "/opt/hive/conf/core-site.xml")
                         .withNetworkAliases(HMS_HOST);
         hmsContainer.setPortBindings(Collections.singletonList("9083:9083"));
-
 
         Startables.deepStart(Stream.of(hmsContainer)).join();
         log.info("HMS just started");
@@ -201,30 +208,35 @@ public class HiveKerberosIT extends TestSuiteBase implements TestResource {
                         .withNetwork(NETWORK)
                         .withCreateContainerCmdModifier(cmd -> cmd.withName(HIVE_SERVER_HOST))
                         .withNetworkAliases(HIVE_SERVER_HOST)
-                        .withFileSystemBind(ContainerUtil.getResourcesFile("/kerberos/krb5.conf").getPath(),
+                        .withFileSystemBind(
+                                ContainerUtil.getResourcesFile("/kerberos/krb5.conf").getPath(),
                                 "/etc/krb5.conf")
                         .withFileSystemBind("/tmp/hive.keytab", "/tmp/hive.keytab")
-                        .withFileSystemBind(ContainerUtil.getResourcesFile("/kerberos/hive-site.xml").getPath(),
+                        .withFileSystemBind(
+                                ContainerUtil.getResourcesFile("/kerberos/hive-site.xml").getPath(),
                                 "/opt/hive/conf/hive-site.xml")
-                        .withFileSystemBind(ContainerUtil.getResourcesFile("/kerberos/core-site.xml").getPath(),
-                                "/opt/hadoop/etc/hadoop/core-site.xml")
-                        .withFileSystemBind(ContainerUtil.getResourcesFile("/kerberos/core-site.xml").getPath(),
+                        .withFileSystemBind(
+                                ContainerUtil.getResourcesFile("/kerberos/core-site.xml").getPath(),
                                 "/opt/hive/conf/core-site.xml")
                         .withFileSystemBind("/tmp/data", "/opt/hive/data")
-                        .withEnv("SERVICE_OPTS", "-Dhive.metastore.uris=thrift://metastore:9083 -Dsun.security.krb5.debug=true -Dsun.security.spnego.debug=true")
+                        //  If there are any issues, you can open the kerberos debug log to view
+                        // more information: -Dsun.security.krb5.debug=true
+                        .withEnv("SERVICE_OPTS", "-Dhive.metastore.uris=thrift://metastore:9083")
                         .withEnv("IS_RESUME", "true")
-//                        .withCommand("/bin/bash", "-c", "chmod 777 /opt/hive/conf/hive.keytab")
                         .dependsOn(hmsContainer);
         hiveServerContainer.setPortBindings(Collections.singletonList("10000:10000"));
 
         Startables.deepStart(Stream.of(hiveServerContainer)).join();
+
         log.info("HiveServer2 just started");
+
         given().ignoreExceptions()
                 .await()
                 .atMost(3600, TimeUnit.SECONDS)
                 .pollDelay(Duration.ofSeconds(10L))
                 .pollInterval(Duration.ofSeconds(3L))
                 .untilAsserted(this::initializeConnection);
+
         prepareTable();
     }
 
@@ -272,23 +284,32 @@ public class HiveKerberosIT extends TestSuiteBase implements TestResource {
     @TestTemplate
     public void testFakeSinkHiveOnHDFS(TestContainer container) throws Exception {
         container.copyAbsolutePathToContainer("/tmp/hive.keytab", "/tmp/hive.keytab");
-        container.copyFileToContainer("/kerberos/krb5.conf","/tmp/krb5.conf");
-        container.copyFileToContainer("/kerberos/hive-site.xml","/tmp/hive-site.xml");
+        container.copyFileToContainer("/kerberos/krb5.conf", "/tmp/krb5.conf");
+        container.copyFileToContainer("/kerberos/hive-site.xml", "/tmp/hive-site.xml");
 
-        Container.ExecResult execResult = container.executeJob("/fake_to_hive_on_hdfs_with_kerberos.conf");
-        Assertions.assertEquals(0, execResult.getExitCode());
+        Container.ExecResult fakeToHiveWithKerberosResult =
+                container.executeJob("/fake_to_hive_on_hdfs_with_kerberos.conf");
+        Assertions.assertEquals(0, fakeToHiveWithKerberosResult.getExitCode());
 
-        Container.ExecResult readResult = container.executeJob("/hive_on_hdfs_to_assert_with_kerberos.conf");
-        Assertions.assertEquals(0, readResult.getExitCode());
+        Container.ExecResult hiveToAssertWithKerberosResult =
+                container.executeJob("/hive_on_hdfs_to_assert_with_kerberos.conf");
+        Assertions.assertEquals(0, hiveToAssertWithKerberosResult.getExitCode());
 
-        Container.ExecResult execResult2 = container.executeJob("/fake_to_hive_on_hdfs.conf");
-        Assertions.assertEquals(1, execResult2.getExitCode());
-        Assertions.assertTrue(execResult2.getStderr().contains("Get hive table information from hive metastore service failed"));
-        Container.ExecResult readResult2 = container.executeJob("/hive_on_hdfs_to_assert.conf");
-        Assertions.assertEquals(1, readResult2.getExitCode());
-        Assertions.assertTrue(readResult2.getStderr().contains("Get hive table information from hive metastore service failed"));
+        Container.ExecResult fakeToHiveResult = container.executeJob("/fake_to_hive_on_hdfs.conf");
+        Assertions.assertEquals(1, fakeToHiveResult.getExitCode());
+        Assertions.assertTrue(
+                fakeToHiveResult
+                        .getStderr()
+                        .contains("Get hive table information from hive metastore service failed"));
+
+        Container.ExecResult hiveToAssertResult =
+                container.executeJob("/hive_on_hdfs_to_assert.conf");
+        Assertions.assertEquals(1, hiveToAssertResult.getExitCode());
+        Assertions.assertTrue(
+                hiveToAssertResult
+                        .getStderr()
+                        .contains("Get hive table information from hive metastore service failed"));
     }
-
 
     @TestTemplate
     @Disabled(

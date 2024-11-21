@@ -20,44 +20,29 @@
         <name>hive.server2.authentication</name>
         <value>KERBEROS</value>
     </property>
-
     <property>
         <name>hive.server2.authentication.kerberos.principal</name>
         <value>hive/metastore.seatunnel@EXAMPLE.COM</value>
     </property>
-
     <property>
         <name>hive.server2.authentication.kerberos.keytab</name>
         <value>/tmp/hive.keytab</value>
     </property>
-
     <property>
         <name>hive.security.authenticator.manager</name>
         <value>org.apache.hadoop.hive.ql.security.SessionStateUserAuthenticator</value>
     </property>
-
     <property>
         <name>hive.metastore.sasl.enabled</name>
         <value>true</value>
     </property>
-
     <property>
         <name>hive.metastore.kerberos.keytab.file</name>
         <value>/tmp/hive.keytab</value>
     </property>
-
     <property>
         <name>hive.metastore.kerberos.principal</name>
         <value>hive/metastore.seatunnel@EXAMPLE.COM</value>
-    </property>
-
-    <property>
-        <name>hive.server2.enable.doAs</name>
-        <value>false</value>
-    </property>
-    <property>
-        <name>hive.tez.exec.inplace.progress</name>
-        <value>false</value>
     </property>
     <property>
         <name>hive.exec.scratchdir</name>
