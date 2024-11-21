@@ -18,22 +18,21 @@
 package org.apache.seatunnel.e2e.connector.hive;
 
 import org.apache.seatunnel.common.utils.ExceptionUtils;
-import org.apache.seatunnel.e2e.common.TestResource;
-import org.apache.seatunnel.e2e.common.TestSuiteBase;
-import org.apache.seatunnel.e2e.common.container.ContainerExtendedFactory;
 import org.apache.seatunnel.e2e.common.container.EngineType;
 import org.apache.seatunnel.e2e.common.container.TestContainer;
+import org.apache.seatunnel.e2e.common.container.seatunnel.SeaTunnelContainer;
 import org.apache.seatunnel.e2e.common.junit.DisabledOnContainer;
-import org.apache.seatunnel.e2e.common.junit.TestContainerExtension;
 import org.apache.seatunnel.e2e.common.util.ContainerUtil;
 
-import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestTemplate;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.Network;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.utility.DockerLoggerFactory;
@@ -56,7 +55,16 @@ import static org.awaitility.Awaitility.given;
         value = {},
         type = {EngineType.SPARK, EngineType.FLINK})
 @Slf4j
-public class HiveKerberosIT extends TestSuiteBase implements TestResource {
+public class HiveKerberosIT extends SeaTunnelContainer {
+
+    // It is necessary to set up a separate network with a fixed name, otherwise network issues may
+    // cause Kerberos authentication failure
+    Network NETWORK =
+            Network.builder()
+                    .createNetworkCmdModifier(cmd -> cmd.withName("SEATUNNEL"))
+                    .enableIpv6(false)
+                    .build();
+
     private static final String CREATE_SQL =
             "CREATE TABLE test_hive_sink_on_hdfs_with_kerberos"
                     + "("
@@ -103,61 +111,54 @@ public class HiveKerberosIT extends TestSuiteBase implements TestResource {
     private Connection hiveConnection;
     private String pluginHiveDir = "/tmp/seatunnel/plugins/Hive/lib";
 
-    @TestContainerExtension
-    protected final ContainerExtendedFactory extendedFactory =
-            container -> {
-                // The jar of hive-exec
-                Container.ExecResult downloadHiveExeCommands =
-                        container.execInContainer(
-                                "sh",
-                                "-c",
-                                "mkdir -p "
-                                        + pluginHiveDir
-                                        + " && cd "
-                                        + pluginHiveDir
-                                        + " && wget "
-                                        + hiveExeUrl());
-                Assertions.assertEquals(
-                        0,
-                        downloadHiveExeCommands.getExitCode(),
-                        downloadHiveExeCommands.getStderr());
-                Container.ExecResult downloadLibFb303Commands =
-                        container.execInContainer(
-                                "sh", "-c", "cd " + pluginHiveDir + " && wget " + libFb303Url());
-                Assertions.assertEquals(
-                        0,
-                        downloadLibFb303Commands.getExitCode(),
-                        downloadLibFb303Commands.getStderr());
-                // The jar of s3
-                Container.ExecResult downloadS3Commands =
-                        container.execInContainer(
-                                "sh", "-c", "cd " + pluginHiveDir + " && wget " + hadoopAwsUrl());
-                Assertions.assertEquals(
-                        0, downloadS3Commands.getExitCode(), downloadS3Commands.getStderr());
-                // The jar of oss
-                Container.ExecResult downloadOssCommands =
-                        container.execInContainer(
-                                "sh",
-                                "-c",
-                                "cd "
-                                        + pluginHiveDir
-                                        + " && wget "
-                                        + aliyunSdkOssUrl()
-                                        + " && wget "
-                                        + jdomUrl()
-                                        + " && wget "
-                                        + hadoopAliyunUrl());
-                Assertions.assertEquals(
-                        0, downloadOssCommands.getExitCode(), downloadOssCommands.getStderr());
-                // The jar of cos
-                Container.ExecResult downloadCosCommands =
-                        container.execInContainer(
-                                "sh", "-c", "cd " + pluginHiveDir + " && wget " + hadoopCosUrl());
-                Assertions.assertEquals(
-                        0, downloadCosCommands.getExitCode(), downloadCosCommands.getStderr());
-            };
+    protected void downloadHivePluginJar() throws IOException, InterruptedException {
+        Container.ExecResult downloadHiveExeCommands =
+                server.execInContainer(
+                        "sh",
+                        "-c",
+                        "mkdir -p "
+                                + pluginHiveDir
+                                + " && cd "
+                                + pluginHiveDir
+                                + " && wget "
+                                + hiveExeUrl());
+        Assertions.assertEquals(
+                0, downloadHiveExeCommands.getExitCode(), downloadHiveExeCommands.getStderr());
+        Container.ExecResult downloadLibFb303Commands =
+                server.execInContainer(
+                        "sh", "-c", "cd " + pluginHiveDir + " && wget " + libFb303Url());
+        Assertions.assertEquals(
+                0, downloadLibFb303Commands.getExitCode(), downloadLibFb303Commands.getStderr());
+        // The jar of s3
+        Container.ExecResult downloadS3Commands =
+                server.execInContainer(
+                        "sh", "-c", "cd " + pluginHiveDir + " && wget " + hadoopAwsUrl());
+        Assertions.assertEquals(
+                0, downloadS3Commands.getExitCode(), downloadS3Commands.getStderr());
+        // The jar of oss
+        Container.ExecResult downloadOssCommands =
+                server.execInContainer(
+                        "sh",
+                        "-c",
+                        "cd "
+                                + pluginHiveDir
+                                + " && wget "
+                                + aliyunSdkOssUrl()
+                                + " && wget "
+                                + jdomUrl()
+                                + " && wget "
+                                + hadoopAliyunUrl());
+        Assertions.assertEquals(
+                0, downloadOssCommands.getExitCode(), downloadOssCommands.getStderr());
+        // The jar of cos
+        Container.ExecResult downloadCosCommands =
+                server.execInContainer(
+                        "sh", "-c", "cd " + pluginHiveDir + " && wget " + hadoopCosUrl());
+        Assertions.assertEquals(
+                0, downloadCosCommands.getExitCode(), downloadCosCommands.getStderr());
+    };
 
-    @BeforeAll
+    @BeforeEach
     @Override
     public void startUp() throws Exception {
 
@@ -238,9 +239,14 @@ public class HiveKerberosIT extends TestSuiteBase implements TestResource {
                 .untilAsserted(this::initializeConnection);
 
         prepareTable();
+
+        // Set the fixed network to SeatunnelContainer
+        super.startUp(this.NETWORK);
+        // Load the hive plugin jar
+        this.downloadHivePluginJar();
     }
 
-    @AfterAll
+    @AfterEach
     @Override
     public void tearDown() throws Exception {
         if (hmsContainer != null) {
@@ -281,29 +287,28 @@ public class HiveKerberosIT extends TestSuiteBase implements TestResource {
         Assertions.assertEquals(0, readResult.getExitCode());
     }
 
-    @TestTemplate
-    public void testFakeSinkHiveOnHDFS(TestContainer container) throws Exception {
-        container.copyAbsolutePathToContainer("/tmp/hive.keytab", "/tmp/hive.keytab");
-        container.copyFileToContainer("/kerberos/krb5.conf", "/tmp/krb5.conf");
-        container.copyFileToContainer("/kerberos/hive-site.xml", "/tmp/hive-site.xml");
+    @Test
+    public void testFakeSinkHiveOnHDFS() throws Exception {
+        copyAbsolutePathToContainer("/tmp/hive.keytab", "/tmp/hive.keytab");
+        copyFileToContainer("/kerberos/krb5.conf", "/tmp/krb5.conf");
+        copyFileToContainer("/kerberos/hive-site.xml", "/tmp/hive-site.xml");
 
         Container.ExecResult fakeToHiveWithKerberosResult =
-                container.executeJob("/fake_to_hive_on_hdfs_with_kerberos.conf");
+                executeJob("/fake_to_hive_on_hdfs_with_kerberos.conf");
         Assertions.assertEquals(0, fakeToHiveWithKerberosResult.getExitCode());
 
         Container.ExecResult hiveToAssertWithKerberosResult =
-                container.executeJob("/hive_on_hdfs_to_assert_with_kerberos.conf");
+                executeJob("/hive_on_hdfs_to_assert_with_kerberos.conf");
         Assertions.assertEquals(0, hiveToAssertWithKerberosResult.getExitCode());
 
-        Container.ExecResult fakeToHiveResult = container.executeJob("/fake_to_hive_on_hdfs.conf");
+        Container.ExecResult fakeToHiveResult = executeJob("/fake_to_hive_on_hdfs.conf");
         Assertions.assertEquals(1, fakeToHiveResult.getExitCode());
         Assertions.assertTrue(
                 fakeToHiveResult
                         .getStderr()
                         .contains("Get hive table information from hive metastore service failed"));
 
-        Container.ExecResult hiveToAssertResult =
-                container.executeJob("/hive_on_hdfs_to_assert.conf");
+        Container.ExecResult hiveToAssertResult = executeJob("/hive_on_hdfs_to_assert.conf");
         Assertions.assertEquals(1, hiveToAssertResult.getExitCode());
         Assertions.assertTrue(
                 hiveToAssertResult
