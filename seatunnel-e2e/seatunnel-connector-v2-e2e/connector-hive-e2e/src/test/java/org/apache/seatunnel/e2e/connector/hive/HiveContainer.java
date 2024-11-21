@@ -17,10 +17,14 @@
 
 package org.apache.seatunnel.e2e.connector.hive;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 
+import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.seatunnel.connectors.seatunnel.file.hadoop.HadoopLoginFactory;
+import org.apache.seatunnel.connectors.seatunnel.file.hdfs.source.config.HdfsSourceConfigOptions;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -28,6 +32,8 @@ import org.testcontainers.containers.wait.strategy.WaitStrategy;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.DockerLoggerFactory;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.Driver;
 import java.sql.SQLException;
@@ -70,24 +76,54 @@ public class HiveContainer extends GenericContainer<HiveContainer> {
         return String.format("thrift://%s:%s", getHost(), getMappedPort(HMS_PORT));
     }
 
-    public String getHiveJdbcUri() {
-        return String.format(
-                "jdbc:hive2://%s:%s/default", getHost(), getMappedPort(HIVE_SERVER_PORT));
+    public String getHiveJdbcUri(boolean enableKerberos) {
+        if(enableKerberos){
+            return String.format(
+                    "jdbc:hive2://%s:%s/default;principal=hive/metastore.seatunnel@EXAMPLE.COM", getHost(), getMappedPort(HIVE_SERVER_PORT));
+        }else {
+            return String.format(
+                    "jdbc:hive2://%s:%s/default", getHost(), getMappedPort(HIVE_SERVER_PORT));
+        }
     }
 
-    public HiveMetaStoreClient createMetaStoreClient() throws MetaException {
+    public HiveMetaStoreClient createMetaStoreClient() throws MetaException{
+        return this.createMetaStoreClient(false);
+    }
+
+    public HiveMetaStoreClient createMetaStoreClient(boolean enableKerberos) throws MetaException {
         HiveConf conf = new HiveConf();
         conf.set("hive.metastore.uris", getMetastoreUri());
-
+        if(enableKerberos) {
+            conf.addResource("kerberos/hive-site.xml");
+        }
         return new HiveMetaStoreClient(conf);
     }
 
     public Connection getConnection()
+            throws ClassNotFoundException, InstantiationException, IllegalAccessException, SQLException {
+        return getConnection(false);
+    }
+
+    public Connection getConnection(boolean enableKerberos)
             throws ClassNotFoundException, InstantiationException, IllegalAccessException,
                     SQLException {
         Driver driver = loadHiveJdbcDriver();
-
-        return driver.connect(getHiveJdbcUri(), getJdbcConnectionConfig());
+        if(!enableKerberos){
+            return driver.connect(getHiveJdbcUri(false), getJdbcConnectionConfig());
+        }
+        Configuration authConf = new Configuration();
+        HiveConf hiveConf = new HiveConf();
+        hiveConf.set("hive.metastore.uris", "thrift://localhost:9083");
+        authConf.set("hadoop.security.authentication", "kerberos");
+        Configuration configuration = new Configuration();
+        configuration.set("hadoop.security.authentication", "KERBEROS");
+        UserGroupInformation.setConfiguration(configuration);
+        try {
+            UserGroupInformation.loginUserFromKeytab("hive/metastore.seatunnel@EXAMPLE.COM", "/tmp/hive.keytab");
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return driver.connect(getHiveJdbcUri(true), getJdbcConnectionConfig());
     }
 
     public Driver loadHiveJdbcDriver()
