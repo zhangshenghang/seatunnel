@@ -111,7 +111,7 @@ public class JdbcGBase8aIT extends AbstractJdbcIT {
 
     @Override
     String driverUrl() {
-        return "https://hadoop.wiki/gbase-connector-java-9.5.0.7-build1-bin.jar";
+        return "https://linux.hadoop.wiki/lib/gbase-connector-java-9.5.0.7-build1-bin.jar";
     }
 
     @Override
