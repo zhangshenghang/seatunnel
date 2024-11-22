@@ -17,6 +17,8 @@
 
 package org.apache.seatunnel.e2e.connector.hive;
 
+import org.apache.seatunnel.e2e.common.util.ContainerUtil;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
@@ -111,13 +113,14 @@ public class HiveContainer extends GenericContainer<HiveContainer> {
             return driver.connect(getHiveJdbcUri(false), getJdbcConnectionConfig());
         }
         Configuration authConf = new Configuration();
-        HiveConf hiveConf = new HiveConf();
-        hiveConf.set("hive.metastore.uris", "thrift://localhost:9083");
         authConf.set("hadoop.security.authentication", "kerberos");
         Configuration configuration = new Configuration();
+        System.setProperty(
+                "java.security.krb5.conf",
+                ContainerUtil.getResourcesFile("/kerberos/krb5_local.conf").getPath());
         configuration.set("hadoop.security.authentication", "KERBEROS");
-        UserGroupInformation.setConfiguration(configuration);
         try {
+            UserGroupInformation.setConfiguration(configuration);
             UserGroupInformation.loginUserFromKeytab(
                     "hive/metastore.seatunnel@EXAMPLE.COM", "/tmp/hive.keytab");
         } catch (IOException e) {
