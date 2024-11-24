@@ -41,6 +41,43 @@ public class MarkdownHeaderTest {
         docsDirectorys.add(Paths.get("..", "docs", "zh"));
     }
 
+    /** Verify that the file names in the English and Chinese directories are the same. */
+    @Test
+    public void testFileNameVerify() {
+        List<String> enFileName =
+                fileName(docsDirectorys.get(0)).stream()
+                        .map(path -> path.replace("/en/", "/"))
+                        .collect(Collectors.toList());
+        List<String> zhFileName =
+                fileName(docsDirectorys.get(1)).stream()
+                        .map(path -> path.replace("/zh/", "/"))
+                        .collect(Collectors.toList());
+
+        long equalCount = enFileName.stream().filter(zhFileName::contains).count();
+        long equalIgnoreCaseCount =
+                enFileName.stream()
+                        .map(String::toLowerCase)
+                        .filter(
+                                name ->
+                                        zhFileName.stream()
+                                                .map(String::toLowerCase)
+                                                .anyMatch(name::equals))
+                        .count();
+
+        Assertions.assertEquals(equalCount, equalIgnoreCaseCount);
+    }
+
+    private List<String> fileName(Path docDirectory) {
+        try (Stream<Path> paths = Files.walk(docDirectory)) {
+            return paths.filter(Files::isRegularFile)
+                    .filter(path -> path.toString().endsWith(".md"))
+                    .map(Path::toString)
+                    .collect(Collectors.toList());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     @Test
     public void testPrimaryHeadersHaveNoTextAbove() {
         docsDirectorys.forEach(
