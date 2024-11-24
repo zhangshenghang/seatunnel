@@ -19,8 +19,10 @@ package org.apache.seatunnel.connectors.seatunnel.clickhouse.util;
 
 import org.apache.seatunnel.api.common.SeaTunnelAPIErrorCode;
 import org.apache.seatunnel.api.table.catalog.PrimaryKey;
+import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.api.table.catalog.TableSchema;
 import org.apache.seatunnel.common.exception.CommonErrorCodeDeprecated;
+import org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.exception.ClickhouseConnectorErrorCode;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.exception.ClickhouseConnectorException;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.shard.Shard;
@@ -348,7 +350,12 @@ public class ClickhouseProxy {
     public void createTable(
             String database, String table, String template, TableSchema tableSchema) {
         String createTableSql =
-                ClickhouseCatalogUtil.getCreateTableSql(template, database, table, tableSchema);
+                ClickhouseCatalogUtil.INSTANCE.getCreateTableSql(
+                        template,
+                        database,
+                        table,
+                        tableSchema,
+                        ClickhouseConfig.SAVE_MODE_CREATE_TEMPLATE.key());
         log.debug("Create Clickhouse table sql: {}", createTableSql);
         executeSql(createTableSql);
     }
@@ -399,20 +406,20 @@ public class ClickhouseProxy {
         }
     }
 
-    public void dropTable(String database, String table) {
-        executeSql(ClickhouseCatalogUtil.getDropTableSql(database, table));
+    public void dropTable(TablePath tablePath, boolean ignoreIfNotExists) {
+        executeSql(ClickhouseCatalogUtil.INSTANCE.getDropTableSql(tablePath, ignoreIfNotExists));
     }
 
-    public void truncateTable(String database, String table) {
-        executeSql(ClickhouseCatalogUtil.getTruncateTableSql(database, table));
+    public void truncateTable(TablePath tablePath, boolean ignoreIfNotExists) {
+        executeSql(ClickhouseCatalogUtil.INSTANCE.getTruncateTableSql(tablePath));
     }
 
-    public void createDatabase(String database) {
-        executeSql(ClickhouseCatalogUtil.getCreateDatabaseSql(database));
+    public void createDatabase(String database, boolean ignoreIfExists) {
+        executeSql(ClickhouseCatalogUtil.INSTANCE.getCreateDatabaseSql(database, ignoreIfExists));
     }
 
-    public void dropDatabase(String database) {
-        executeSql(ClickhouseCatalogUtil.getDropDatabaseSql(database));
+    public void dropDatabase(String database, boolean ignoreIfNotExists) {
+        executeSql(ClickhouseCatalogUtil.INSTANCE.getDropDatabaseSql(database, ignoreIfNotExists));
     }
 
     public void close() {

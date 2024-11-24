@@ -32,6 +32,7 @@ import org.apache.seatunnel.api.table.catalog.exception.DatabaseAlreadyExistExce
 import org.apache.seatunnel.api.table.catalog.exception.DatabaseNotExistException;
 import org.apache.seatunnel.api.table.catalog.exception.TableAlreadyExistException;
 import org.apache.seatunnel.api.table.catalog.exception.TableNotExistException;
+import org.apache.seatunnel.connectors.seatunnel.clickhouse.config.ClickhouseConfig;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.ClickhouseCatalogUtil;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.ClickhouseProxy;
 import org.apache.seatunnel.connectors.seatunnel.clickhouse.util.ClickhouseUtil;
@@ -148,7 +149,7 @@ public class ClickhouseCatalog implements Catalog {
     @Override
     public void dropTable(TablePath tablePath, boolean ignoreIfNotExists)
             throws TableNotExistException, CatalogException {
-        proxy.dropTable(tablePath.getDatabaseName(), tablePath.getTableName());
+        proxy.dropTable(tablePath, ignoreIfNotExists);
     }
 
     @Override
@@ -156,7 +157,7 @@ public class ClickhouseCatalog implements Catalog {
             throws TableNotExistException, CatalogException {
         try {
             if (tableExists(tablePath)) {
-                proxy.truncateTable(tablePath.getDatabaseName(), tablePath.getTableName());
+                proxy.truncateTable(tablePath, ignoreIfNotExists);
             }
         } catch (Exception e) {
             throw new CatalogException("Truncate table failed", e);
@@ -184,13 +185,13 @@ public class ClickhouseCatalog implements Catalog {
     @Override
     public void createDatabase(TablePath tablePath, boolean ignoreIfExists)
             throws DatabaseAlreadyExistException, CatalogException {
-        proxy.createDatabase(tablePath.getDatabaseName());
+        proxy.createDatabase(tablePath.getDatabaseName(), ignoreIfExists);
     }
 
     @Override
     public void dropDatabase(TablePath tablePath, boolean ignoreIfNotExists)
             throws DatabaseNotExistException, CatalogException {
-        proxy.dropDatabase(tablePath.getDatabaseName());
+        proxy.dropDatabase(tablePath.getDatabaseName(), ignoreIfNotExists);
     }
 
     @SuppressWarnings("MagicNumber")
@@ -199,8 +200,6 @@ public class ClickhouseCatalog implements Catalog {
         options.put("connector", "clickhouse");
         options.put("host", readonlyConfig.get(HOST));
         options.put("database", tablePath.getDatabaseName());
-        options.put("username", readonlyConfig.get(USERNAME));
-        options.put("password", readonlyConfig.get(PASSWORD));
         return options;
     }
 
@@ -247,25 +246,26 @@ public class ClickhouseCatalog implements Catalog {
         if (actionType == ActionType.CREATE_TABLE) {
             Preconditions.checkArgument(catalogTable.isPresent(), "CatalogTable cannot be null");
             return new SQLPreviewResult(
-                    ClickhouseCatalogUtil.getCreateTableSql(
+                    ClickhouseCatalogUtil.INSTANCE.getCreateTableSql(
                             template,
                             tablePath.getDatabaseName(),
                             tablePath.getTableName(),
-                            catalogTable.get().getTableSchema()));
+                            catalogTable.get().getTableSchema(),
+                            ClickhouseConfig.SAVE_MODE_CREATE_TEMPLATE.key()));
         } else if (actionType == ActionType.DROP_TABLE) {
             return new SQLPreviewResult(
-                    ClickhouseCatalogUtil.getDropTableSql(
-                            tablePath.getDatabaseName(), tablePath.getTableName()));
+                    ClickhouseCatalogUtil.INSTANCE.getDropTableSql(tablePath, true));
         } else if (actionType == ActionType.TRUNCATE_TABLE) {
             return new SQLPreviewResult(
-                    ClickhouseCatalogUtil.getTruncateTableSql(
-                            tablePath.getDatabaseName(), tablePath.getTableName()));
+                    ClickhouseCatalogUtil.INSTANCE.getTruncateTableSql(tablePath));
         } else if (actionType == ActionType.CREATE_DATABASE) {
             return new SQLPreviewResult(
-                    ClickhouseCatalogUtil.getCreateDatabaseSql(tablePath.getDatabaseName()));
+                    ClickhouseCatalogUtil.INSTANCE.getCreateDatabaseSql(
+                            tablePath.getDatabaseName(), true));
         } else if (actionType == ActionType.DROP_DATABASE) {
             return new SQLPreviewResult(
-                    ClickhouseCatalogUtil.getDropDatabaseSql(tablePath.getDatabaseName()));
+                    ClickhouseCatalogUtil.INSTANCE.getDropDatabaseSql(
+                            tablePath.getDatabaseName(), true));
         } else {
             throw new UnsupportedOperationException("Unsupported action type: " + actionType);
         }

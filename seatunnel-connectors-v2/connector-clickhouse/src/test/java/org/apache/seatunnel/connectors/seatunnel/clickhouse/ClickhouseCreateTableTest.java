@@ -59,7 +59,7 @@ public class ClickhouseCreateTableTest {
                 PhysicalColumn.of("create_time", BasicType.LONG_TYPE, (Long) null, true, null, ""));
 
         String createTableSql =
-                ClickhouseCatalogUtil.getCreateTableSql(
+                ClickhouseCatalogUtil.INSTANCE.getCreateTableSql(
                         "CREATE TABLE IF NOT EXISTS  `${database}`.`${table_name}` (\n"
                                 + "    ${rowtype_primary_key},\n"
                                 + "    ${rowtype_fields}\n"
@@ -95,7 +95,8 @@ public class ClickhouseCreateTableTest {
                                                                                         .ColumnSortType
                                                                                         .ASC)))))
                                 .columns(columns)
-                                .build());
+                                .build(),
+                        ClickhouseConfig.SAVE_MODE_CREATE_TEMPLATE.key());
         Assertions.assertEquals(
                 createTableSql,
                 "CREATE TABLE IF NOT EXISTS  `test1`.`test2` (\n"
@@ -123,8 +124,12 @@ public class ClickhouseCreateTableTest {
                 Assertions.assertThrows(
                         SeaTunnelRuntimeException.class,
                         () ->
-                                ClickhouseCatalogUtil.getCreateTableSql(
-                                        createTemplate, "test1", "test2", tableSchema));
+                                ClickhouseCatalogUtil.INSTANCE.getCreateTableSql(
+                                        createTemplate,
+                                        "test1",
+                                        "test2",
+                                        tableSchema,
+                                        ClickhouseConfig.SAVE_MODE_CREATE_TEMPLATE.key()));
 
         String primaryKeyHolder = SaveModePlaceHolder.ROWTYPE_PRIMARY_KEY.getPlaceHolder();
         SeaTunnelRuntimeException exceptSeaTunnelRuntimeException =
@@ -200,7 +205,7 @@ public class ClickhouseCreateTableTest {
                         "L_COMMENT", BasicType.STRING_TYPE, (Long) null, false, null, ""));
 
         String result =
-                ClickhouseCatalogUtil.getCreateTableSql(
+                ClickhouseCatalogUtil.INSTANCE.getCreateTableSql(
                         "CREATE TABLE IF NOT EXISTS `${database}`.`${table}` (\n"
                                 + "`L_COMMITDATE`,\n"
                                 + "${rowtype_primary_key},\n"
@@ -218,7 +223,8 @@ public class ClickhouseCreateTableTest {
                                         PrimaryKey.of(
                                                 "", Arrays.asList("L_ORDERKEY", "L_LINENUMBER")))
                                 .columns(columns)
-                                .build());
+                                .build(),
+                        ClickhouseConfig.SAVE_MODE_CREATE_TEMPLATE.key());
         String expected =
                 "CREATE TABLE IF NOT EXISTS `tpch`.`lineitem` (\n"
                         + "`L_COMMITDATE` Date ,\n"

@@ -63,7 +63,6 @@ public class ClickhouseSinkWriter
         this.proxy = new ClickhouseProxy(option.getShardMetadata().getDefaultShard().getNode());
         this.shardRouter = new ShardRouter(proxy, option.getShardMetadata());
         this.statementMap = initStatementMap();
-        System.out.println(123);
     }
 
     @Override

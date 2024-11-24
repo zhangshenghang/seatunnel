@@ -38,6 +38,7 @@ import org.apache.seatunnel.api.table.type.PrimitiveByteArrayType;
 import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
 import org.apache.seatunnel.common.exception.CommonErrorCodeDeprecated;
 import org.apache.seatunnel.common.utils.JdbcUrlUtil;
+import org.apache.seatunnel.connectors.seatunnel.starrocks.config.StarRocksSinkOptions;
 import org.apache.seatunnel.connectors.seatunnel.starrocks.exception.StarRocksConnectorException;
 import org.apache.seatunnel.connectors.seatunnel.starrocks.sink.StarRocksSaveModeUtil;
 
@@ -202,11 +203,12 @@ public class StarRocksCatalog implements Catalog {
     public void createTable(TablePath tablePath, CatalogTable table, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException, CatalogException {
         this.createTable(
-                StarRocksSaveModeUtil.getCreateTableSql(
+                StarRocksSaveModeUtil.INSTANCE.getCreateTableSql(
                         template,
                         tablePath.getDatabaseName(),
                         tablePath.getTableName(),
-                        table.getTableSchema()));
+                        table.getTableSchema(),
+                        StarRocksSinkOptions.SAVE_MODE_CREATE_TEMPLATE.key()));
     }
 
     @Override
@@ -214,7 +216,9 @@ public class StarRocksCatalog implements Catalog {
             throws TableNotExistException, CatalogException {
         try {
             conn.createStatement()
-                    .execute(StarRocksSaveModeUtil.getDropTableSql(tablePath, ignoreIfNotExists));
+                    .execute(
+                            StarRocksSaveModeUtil.INSTANCE.getDropTableSql(
+                                    tablePath, ignoreIfNotExists));
         } catch (Exception e) {
             throw new CatalogException(
                     String.format("Failed listing database in catalog %s", catalogName), e);
@@ -226,7 +230,7 @@ public class StarRocksCatalog implements Catalog {
         try {
             if (ignoreIfNotExists) {
                 conn.createStatement()
-                        .execute(StarRocksSaveModeUtil.getTruncateTableSql(tablePath));
+                        .execute(StarRocksSaveModeUtil.INSTANCE.getTruncateTableSql(tablePath));
             }
         } catch (Exception e) {
             throw new CatalogException(
@@ -263,7 +267,7 @@ public class StarRocksCatalog implements Catalog {
         try {
             conn.createStatement()
                     .execute(
-                            StarRocksSaveModeUtil.getCreateDatabaseSql(
+                            StarRocksSaveModeUtil.INSTANCE.getCreateDatabaseSql(
                                     tablePath.getDatabaseName(), ignoreIfExists));
         } catch (Exception e) {
             throw new CatalogException(
@@ -277,7 +281,7 @@ public class StarRocksCatalog implements Catalog {
         try {
             conn.createStatement()
                     .execute(
-                            StarRocksSaveModeUtil.getDropDatabaseSql(
+                            StarRocksSaveModeUtil.INSTANCE.getDropDatabaseSql(
                                     tablePath.getDatabaseName(), ignoreIfNotExists));
         } catch (Exception e) {
             throw new CatalogException(
@@ -359,8 +363,6 @@ public class StarRocksCatalog implements Catalog {
         options.put("connector", "starrocks");
         options.put("url", baseUrl + tablePath.getDatabaseName());
         options.put("table-name", tablePath.getFullName());
-        options.put("username", username);
-        options.put("password", pwd);
         return options;
     }
 
@@ -496,18 +498,22 @@ public class StarRocksCatalog implements Catalog {
         if (actionType == ActionType.CREATE_TABLE) {
             Preconditions.checkArgument(catalogTable.isPresent(), "CatalogTable cannot be null");
             return new SQLPreviewResult(
-                    StarRocksSaveModeUtil.getCreateTableSql(
+                    StarRocksSaveModeUtil.INSTANCE.getCreateTableSql(
                             template,
                             tablePath.getDatabaseName(),
                             tablePath.getTableName(),
-                            catalogTable.get().getTableSchema()));
+                            catalogTable.get().getTableSchema(),
+                            StarRocksSinkOptions.SAVE_MODE_CREATE_TEMPLATE.key()));
         } else if (actionType == ActionType.DROP_TABLE) {
-            return new SQLPreviewResult(StarRocksSaveModeUtil.getDropTableSql(tablePath, true));
+            return new SQLPreviewResult(
+                    StarRocksSaveModeUtil.INSTANCE.getDropTableSql(tablePath, true));
         } else if (actionType == ActionType.TRUNCATE_TABLE) {
-            return new SQLPreviewResult(StarRocksSaveModeUtil.getTruncateTableSql(tablePath));
+            return new SQLPreviewResult(
+                    StarRocksSaveModeUtil.INSTANCE.getTruncateTableSql(tablePath));
         } else if (actionType == ActionType.CREATE_DATABASE) {
             return new SQLPreviewResult(
-                    StarRocksSaveModeUtil.getCreateDatabaseSql(tablePath.getDatabaseName(), true));
+                    StarRocksSaveModeUtil.INSTANCE.getCreateDatabaseSql(
+                            tablePath.getDatabaseName(), true));
         } else if (actionType == ActionType.DROP_DATABASE) {
             return new SQLPreviewResult(
                     "DROP DATABASE IF EXISTS `" + tablePath.getDatabaseName() + "`");
