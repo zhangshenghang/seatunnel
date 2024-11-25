@@ -27,7 +27,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -42,7 +44,7 @@ public class MarkdownHeaderTest {
     }
 
     @Test
-    public void testFileNameVerify() {
+    public void testChineseDocFileNameContainsInEnglishVersionDoc() {
         // Verify that the file names in the English and Chinese directories are the same.
         List<String> enFileName =
                 fileName(docsDirectorys.get(0)).stream()
@@ -53,18 +55,35 @@ public class MarkdownHeaderTest {
                         .map(path -> path.replace("/zh/", "/"))
                         .collect(Collectors.toList());
 
-        long equalCount = enFileName.stream().filter(zhFileName::contains).count();
-        long equalIgnoreCaseCount =
-                enFileName.stream()
-                        .map(String::toLowerCase)
-                        .filter(
-                                name ->
-                                        zhFileName.stream()
-                                                .map(String::toLowerCase)
-                                                .anyMatch(name::equals))
-                        .count();
+        // Collect case-sensitive mismatched files that match when case is ignored
+        Map<String, String> mismatchedFiles = new LinkedHashMap<>();
 
-        Assertions.assertEquals(equalCount, equalIgnoreCaseCount);
+        enFileName.forEach(
+                enFile -> {
+                    zhFileName.stream()
+                            .filter(
+                                    zhFile ->
+                                            !enFile.equals(zhFile)
+                                                    && enFile.toLowerCase()
+                                                            .equals(zhFile.toLowerCase()))
+                            .findFirst()
+                            .ifPresent(zhFile -> mismatchedFiles.put(enFile, zhFile));
+                });
+
+        // If there are unmatched files, throw an exception
+        if (!mismatchedFiles.isEmpty()) {
+            StringBuilder errorMessage = new StringBuilder();
+            errorMessage.append(
+                    String.format(
+                            "Found %d files with case mismatches:\n", mismatchedFiles.size()));
+
+            mismatchedFiles.forEach(
+                    (enFile, zhFile) ->
+                            errorMessage.append(
+                                    String.format("EN: %s <-> ZH: %s\n", enFile, zhFile)));
+
+            throw new AssertionError(errorMessage.toString());
+        }
     }
 
     private List<String> fileName(Path docDirectory) {
