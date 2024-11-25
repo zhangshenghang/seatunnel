@@ -27,13 +27,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class MarkdownHeaderTest {
+public class MarkdownTest {
 
     private static final List<Path> docsDirectorys = new ArrayList<>();
 
@@ -55,32 +53,24 @@ public class MarkdownHeaderTest {
                         .map(path -> path.replace("/zh/", "/"))
                         .collect(Collectors.toList());
 
-        // Collect case-sensitive mismatched files that match when case is ignored
-        Map<String, String> mismatchedFiles = new LinkedHashMap<>();
+        // Find Chinese files that don't have English counterparts
+        List<String> missingEnglishFiles =
+                zhFileName.stream()
+                        .filter(zhFile -> !enFileName.contains(zhFile))
+                        .collect(Collectors.toList());
 
-        enFileName.forEach(
-                enFile -> {
-                    zhFileName.stream()
-                            .filter(
-                                    zhFile ->
-                                            !enFile.equals(zhFile)
-                                                    && enFile.toLowerCase()
-                                                            .equals(zhFile.toLowerCase()))
-                            .findFirst()
-                            .ifPresent(zhFile -> mismatchedFiles.put(enFile, zhFile));
-                });
-
-        // If there are unmatched files, throw an exception
-        if (!mismatchedFiles.isEmpty()) {
+        // If there are files missing English versions, throw an exception
+        if (!missingEnglishFiles.isEmpty()) {
             StringBuilder errorMessage = new StringBuilder();
             errorMessage.append(
                     String.format(
-                            "Found %d files with case mismatches:\n", mismatchedFiles.size()));
+                            "Found %d Chinese files without English versions:\n",
+                            missingEnglishFiles.size()));
 
-            mismatchedFiles.forEach(
-                    (enFile, zhFile) ->
+            missingEnglishFiles.forEach(
+                    file ->
                             errorMessage.append(
-                                    String.format("EN: %s <-> ZH: %s\n", enFile, zhFile)));
+                                    String.format("Missing English version for: %s\n", file)));
 
             throw new AssertionError(errorMessage.toString());
         }
