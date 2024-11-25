@@ -41,9 +41,9 @@ public class MarkdownHeaderTest {
         docsDirectorys.add(Paths.get("..", "docs", "zh"));
     }
 
-    /** Verify that the file names in the English and Chinese directories are the same. */
     @Test
     public void testFileNameVerify() {
+        // Verify that the file names in the English and Chinese directories are the same.
         List<String> enFileName =
                 fileName(docsDirectorys.get(0)).stream()
                         .map(path -> path.replace("/en/", "/"))
