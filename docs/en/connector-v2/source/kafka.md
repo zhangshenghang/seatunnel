@@ -59,6 +59,7 @@ They can be downloaded via install-plugin.sh or from the Maven central repositor
 ### Simple
 
 > This example reads the data of kafka's topic_1, topic_2, topic_3 and prints it to the client.And if you have not yet installed and deployed SeaTunnel, you need to follow the instructions in Install SeaTunnel to install and deploy SeaTunnel. And if you have not yet installed and deployed SeaTunnel, you need to follow the instructions in [Install SeaTunnel](../../start-v2/locally/deployment.md) to install and deploy SeaTunnel. And then follow the instructions in [Quick Start With SeaTunnel Engine](../../start-v2/locally/quick-start-seatunnel-engine.md) to run this job.
+> In batch mode, during the enumerator sharding process, it will fetch the latest offset for each partition and use it as the stopping point.
 
 ```hocon
 # Defining the runtime environment
@@ -188,6 +189,65 @@ source {
 
 > This is written to the same pg table according to different formats and topics of parsing kafka Perform upsert operations based on the id
 
+> Note: Kafka is an unstructured data source and should be use 'tables_configs', and 'table_list' will be removed in the future.
+
+```hocon
+
+env {
+  execution.parallelism = 1
+  job.mode = "BATCH"
+}
+
+source {
+  Kafka {
+    bootstrap.servers = "kafka_e2e:9092"
+    tables_configs = [
+      {
+        topic = "^test-ogg-sou.*"
+        pattern = "true"
+        consumer.group = "ogg_multi_group"
+        start_mode = earliest
+        schema = {
+          fields {
+            id = "int"
+            name = "string"
+            description = "string"
+            weight = "string"
+          }
+        },
+        format = ogg_json
+      },
+      {
+        topic = "test-cdc_mds"
+        start_mode = earliest
+        schema = {
+          fields {
+            id = "int"
+            name = "string"
+            description = "string"
+            weight = "string"
+          }
+        },
+        format = canal_json
+      }
+    ]
+  }
+}
+
+sink {
+  Jdbc {
+    driver = org.postgresql.Driver
+    url = "jdbc:postgresql://postgresql:5432/test?loggerLevel=OFF"
+    user = test
+    password = test
+    generate_sink_sql = true
+    database = test
+    table = public.sink
+    primary_keys = ["id"]
+  }
+}
+```
+
 ```hocon
 
 env {
@@ -289,7 +349,7 @@ source {
               """
     bootstrap.servers = "kafkaCluster:9092"
     start_mode = "earliest"
-    result_table_name = "kafka_table"
+    plugin_output = "kafka_table"
   }
 }
 ```
