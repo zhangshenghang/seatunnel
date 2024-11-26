@@ -44,7 +44,6 @@ import scala.Tuple2;
 
 import java.io.Serializable;
 import java.net.URL;
-import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -98,7 +97,7 @@ public final class FactoryUtil {
                 // TODO remove it when all connector use `getProducedCatalogTables`
                 SeaTunnelDataType<T> seaTunnelDataType = source.getProducedType();
                 final String tableId =
-                        options.getOptional(CommonOptions.RESULT_TABLE_NAME).orElse(DEFAULT_ID);
+                        options.getOptional(CommonOptions.PLUGIN_OUTPUT).orElse(DEFAULT_ID);
                 catalogTables =
                         CatalogTableUtil.convertDataTypeToCatalogTables(seaTunnelDataType, tableId);
             }
@@ -339,16 +338,15 @@ public final class FactoryUtil {
         return sinkOptionRule;
     }
 
-    public static SeaTunnelTransform<?> createAndPrepareTransform(
-            CatalogTable catalogTable,
+    public static SeaTunnelTransform<?> createAndPrepareMultiTableTransform(
+            List<CatalogTable> catalogTables,
             ReadonlyConfig options,
             ClassLoader classLoader,
             String factoryIdentifier) {
         final TableTransformFactory factory =
                 discoverFactory(classLoader, TableTransformFactory.class, factoryIdentifier);
         TableTransformFactoryContext context =
-                new TableTransformFactoryContext(
-                        Collections.singletonList(catalogTable), options, classLoader);
+                new TableTransformFactoryContext(catalogTables, options, classLoader);
         ConfigValidator.of(context.getOptions()).validate(factory.optionRule());
         return factory.createTransform(context).createTransform();
     }

@@ -14,33 +14,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.seatunnel.transform.common;
 
+package org.apache.seatunnel.transform.rowkind;
+
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
-import org.apache.seatunnel.api.transform.SeaTunnelMultiRowTransform;
-
-import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
+import org.apache.seatunnel.api.transform.SeaTunnelTransform;
+import org.apache.seatunnel.transform.common.AbstractMultiCatalogMapTransform;
 
 import java.util.List;
 
-@Slf4j
-public abstract class AbstractCatalogMultiRowTransform
-        extends AbstractSeaTunnelTransform<SeaTunnelRow, List<SeaTunnelRow>>
-        implements SeaTunnelMultiRowTransform<SeaTunnelRow> {
+public class RowKindExtractorMultiCatalogTransform extends AbstractMultiCatalogMapTransform {
 
-    public AbstractCatalogMultiRowTransform(@NonNull CatalogTable inputCatalogTable) {
-        super(inputCatalogTable);
-    }
-
-    public AbstractCatalogMultiRowTransform(
-            @NonNull CatalogTable inputCatalogTable, ErrorHandleWay rowErrorHandleWay) {
-        super(inputCatalogTable, rowErrorHandleWay);
+    public RowKindExtractorMultiCatalogTransform(
+            List<CatalogTable> inputCatalogTables, ReadonlyConfig config) {
+        super(inputCatalogTables, config);
     }
 
     @Override
-    public List<SeaTunnelRow> flatMap(SeaTunnelRow row) {
-        return transform(row);
+    public String getPluginName() {
+        return RowKindExtractorTransformConfig.PLUGIN_NAME;
+    }
+
+    @Override
+    protected SeaTunnelTransform<SeaTunnelRow> buildTransform(
+            CatalogTable inputCatalogTable, ReadonlyConfig config) {
+        return new RowKindExtractorTransform(config, inputCatalogTable);
     }
 }
