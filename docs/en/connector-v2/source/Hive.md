@@ -120,6 +120,24 @@ Source plugin common parameters, please refer to [Source Common Options](../sour
 ```
 
 ### Example 2: Multiple tables
+> Note: Hive is a structured data source and should be use 'table_list', and 'tables_configs' will be removed in the future.
+
+```bash
+
+  Hive {
+    table_list = [
+        {
+          table_name = "default.seatunnel_orc_1"
+          metastore_uri = "thrift://namenode001:9083"
+        },
+        {
+          table_name = "default.seatunnel_orc_2"
+          metastore_uri = "thrift://namenode001:9083"
+        }
+    ]
+  }
+
+```
 
 ```bash
 
@@ -137,6 +155,30 @@ Source plugin common parameters, please refer to [Source Common Options](../sour
   }
 
 ```
+
+### Example3 : Kerberos
+
+```bash
+source {
+  Hive {
+    table_name = "default.test_hive_sink_on_hdfs_with_kerberos"
+    metastore_uri = "thrift://metastore:9083"
+    hive.hadoop.conf-path = "/tmp/hadoop"
+    result_table_name = hive_source
+    hive_site_path = "/tmp/hive-site.xml"
+    kerberos_principal = "hive/metastore.seatunnel@EXAMPLE.COM"
+    kerberos_keytab_path = "/tmp/hive.keytab"
+    krb5_path = "/tmp/krb5.conf"
+  }
+}
+```
+
+Description:
+
+- `hive_site_path`: The path to the `hive-site.xml` file.
+- `kerberos_principal`: The principal for Kerberos authentication.
+- `kerberos_keytab_path`: The keytab file path for Kerberos authentication.
+- `krb5_path`: The path to the `krb5.conf` file used for Kerberos authentication.
 
 ## Hive on s3
 

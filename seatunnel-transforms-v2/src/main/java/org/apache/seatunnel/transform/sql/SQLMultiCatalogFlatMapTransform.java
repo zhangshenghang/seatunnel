@@ -15,30 +15,31 @@
  * limitations under the License.
  */
 
-package org.apache.seatunnel.transform.common;
+package org.apache.seatunnel.transform.sql;
 
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
-import org.apache.seatunnel.api.transform.SeaTunnelTransform;
+import org.apache.seatunnel.api.transform.SeaTunnelFlatMapTransform;
+import org.apache.seatunnel.transform.common.AbstractMultiCatalogFlatMapTransform;
 
-import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
+import java.util.List;
 
-@Slf4j
-public abstract class AbstractCatalogSupportTransform
-        extends AbstractSeaTunnelTransform<SeaTunnelRow, SeaTunnelRow>
-        implements SeaTunnelTransform<SeaTunnelRow> {
-    public AbstractCatalogSupportTransform(@NonNull CatalogTable inputCatalogTable) {
-        super(inputCatalogTable);
-    }
+public class SQLMultiCatalogFlatMapTransform extends AbstractMultiCatalogFlatMapTransform {
 
-    public AbstractCatalogSupportTransform(
-            @NonNull CatalogTable inputCatalogTable, ErrorHandleWay rowErrorHandleWay) {
-        super(inputCatalogTable, rowErrorHandleWay);
+    public SQLMultiCatalogFlatMapTransform(
+            List<CatalogTable> inputCatalogTables, ReadonlyConfig config) {
+        super(inputCatalogTables, config);
     }
 
     @Override
-    public SeaTunnelRow map(SeaTunnelRow row) {
-        return transform(row);
+    public String getPluginName() {
+        return SQLTransform.PLUGIN_NAME;
+    }
+
+    @Override
+    protected SeaTunnelFlatMapTransform<SeaTunnelRow> buildTransform(
+            CatalogTable inputCatalogTable, ReadonlyConfig config) {
+        return new SQLTransform(config, inputCatalogTable);
     }
 }
