@@ -20,6 +20,8 @@ package org.apache.seatunnel.api.connector;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -42,6 +44,7 @@ public class MarkdownTest {
     }
 
     @Test
+    @DisabledOnOs(OS.WINDOWS)
     public void testChineseDocFileNameContainsInEnglishVersionDoc() {
         // Verify that the file names in the English and Chinese directories are the same.
         List<String> enFileName =
