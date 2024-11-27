@@ -29,6 +29,7 @@ import org.apache.seatunnel.api.table.type.PrimitiveByteArrayType;
 import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
+import org.apache.seatunnel.common.utils.FileUtils;
 import org.apache.seatunnel.e2e.common.TestResource;
 import org.apache.seatunnel.e2e.common.TestSuiteBase;
 import org.apache.seatunnel.e2e.common.container.EngineType;
@@ -65,6 +66,7 @@ import org.testcontainers.utility.DockerLoggerFactory;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
@@ -216,13 +218,19 @@ public class KafkaKerberosIT extends TestSuiteBase implements TestResource {
                         .withLogConsumer(
                                 new Slf4jLogConsumer(
                                         DockerLoggerFactory.getLogger(KAFKA_IMAGE_NAME)))
-                        .withCommand("bash", "-c", "chmod +x /start.sh && sh /start.sh");
+                        .withCommand("bash", "-c", "sudo chmod +x /start.sh && sudo sh /start.sh");
         kafkaContainer.setPortBindings(Arrays.asList("9092:9092", "2181:2181"));
         Startables.deepStart(Stream.of(kafkaContainer)).join();
         log.info("Kafka container started");
 
+        System.out.println(
+                "HOSTS FILE BEFORE:" + FileUtils.readFileToStr(new File("/etc/hosts").toPath()));
+
         // Add Hosts, local connection kerberos kafka use
         appendToHosts("127.0.0.1", "kafkacluster");
+
+        System.out.println(
+                "HOSTS FILE:" + FileUtils.readFileToStr(new File("/etc/hosts").toPath()));
 
         Awaitility.given()
                 .ignoreExceptions()
