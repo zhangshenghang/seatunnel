@@ -64,10 +64,7 @@ import org.testcontainers.utility.DockerLoggerFactory;
 
 import lombok.extern.slf4j.Slf4j;
 
-import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -90,20 +87,21 @@ import static org.awaitility.Awaitility.given;
         disabledReason = "Currently E2E only supports Seatunnel engine")
 @Slf4j
 public class KafkaKerberosIT extends TestSuiteBase implements TestResource {
+
     private static final String KAFKA_IMAGE_NAME = "confluentinc/cp-kafka:7.0.9";
     private static final String KERBEROS_IMAGE_NAME = "zhangshenghang/kerberos-server:1.0";
 
     // The hostname is uniformly set to lowercase letters to prevent errors during Kerberos
     // authentication
     private static final String KAFKA_HOST = "kafkacluster";
+    private static final String BOOTSTRAP_SERVERS = KAFKA_HOST + ":9092";
 
     private KafkaProducer<byte[], byte[]> producer;
 
     private GenericContainer<?> kafkaContainer;
-    private GenericContainer<?> zookeeperContainer;
     private GenericContainer<?> kerberosContainer;
 
-    private static final SeaTunnelRowType SEATUNNEL_ROW_TYPE =
+    private final SeaTunnelRowType SEATUNNEL_ROW_TYPE =
             new SeaTunnelRowType(
                     new String[] {
                         "id",
@@ -223,14 +221,8 @@ public class KafkaKerberosIT extends TestSuiteBase implements TestResource {
         Startables.deepStart(Stream.of(kafkaContainer)).join();
         log.info("Kafka container started");
 
-        System.out.println(
-                "HOSTS FILE BEFORE:" + FileUtils.readFileToStr(new File("/etc/hosts").toPath()));
-
         // Add Hosts, local connection kerberos kafka use
         appendToHosts("127.0.0.1", "kafkacluster");
-
-        System.out.println(
-                "HOSTS FILE:" + FileUtils.readFileToStr(new File("/etc/hosts").toPath()));
 
         Awaitility.given()
                 .ignoreExceptions()
@@ -241,10 +233,8 @@ public class KafkaKerberosIT extends TestSuiteBase implements TestResource {
     }
 
     private void initKafkaProducer() {
-
         Properties props = new Properties();
-        String bootstrapServers = "kafkacluster:9092";
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
         props.put("security.protocol", "SASL_PLAINTEXT");
@@ -255,7 +245,7 @@ public class KafkaKerberosIT extends TestSuiteBase implements TestResource {
 
     private Properties kafkaConsumerConfig() {
         Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafkacluster:9092");
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "seatunnel-kafka-sink-group");
         props.put(
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
@@ -277,14 +267,6 @@ public class KafkaKerberosIT extends TestSuiteBase implements TestResource {
 
             Process process = processBuilder.start();
 
-            try (BufferedReader reader =
-                    new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    System.out.println(line);
-                }
-            }
-
             int exitCode = process.waitFor();
             if (exitCode == 0) {
                 log.info("Successfully added to /etc/hosts: {}", entry);
@@ -293,7 +275,7 @@ public class KafkaKerberosIT extends TestSuiteBase implements TestResource {
             }
         } catch (Exception e) {
             log.error("Failed to add to /etc/hosts: {}", e.getMessage());
-            e.printStackTrace();
+            throw new RuntimeException(e);
         }
     }
 
