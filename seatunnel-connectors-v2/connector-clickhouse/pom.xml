@@ -72,6 +72,7 @@
             <groupId>org.apache.seatunnel</groupId>
             <artifactId>connector-common</artifactId>
             <version>${project.version}</version>
+            <scope>provided</scope>
         </dependency>
 
     </dependencies>
