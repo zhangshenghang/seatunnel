@@ -54,7 +54,6 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.TestTemplate;
-import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
@@ -205,10 +204,6 @@ public class KafkaKerberosIT extends TestSuiteBase implements TestResource {
                         .withFileSystemBind(
                                 ContainerUtil.getResourcesFile("/kerberos/krb5.conf").getPath(),
                                 "/etc/krb5.conf")
-                        .withFileSystemBind(
-                                ContainerUtil.getResourcesFile("/kerberos/start.sh").getPath(),
-                                "/start.sh",
-                                BindMode.READ_WRITE)
                         .withExposedPorts(9092, 2181)
                         .withFileSystemBind(
                                 ContainerUtil.getResourcesFile("/kerberos/kafka.properties")
@@ -218,7 +213,12 @@ public class KafkaKerberosIT extends TestSuiteBase implements TestResource {
                         .withLogConsumer(
                                 new Slf4jLogConsumer(
                                         DockerLoggerFactory.getLogger(KAFKA_IMAGE_NAME)))
-                        .withCommand("bash", "-c", "sudo chmod +x /start.sh && sudo sh /start.sh");
+                        .withCommand(
+                                "bash",
+                                "-c",
+                                FileUtils.readFileToStr(
+                                        ContainerUtil.getResourcesFile("/kerberos/start.sh")
+                                                .toPath()));
         kafkaContainer.setPortBindings(Arrays.asList("9092:9092", "2181:2181"));
         Startables.deepStart(Stream.of(kafkaContainer)).join();
         log.info("Kafka container started");
@@ -287,12 +287,12 @@ public class KafkaKerberosIT extends TestSuiteBase implements TestResource {
 
             int exitCode = process.waitFor();
             if (exitCode == 0) {
-                System.out.println("成功添加到 /etc/hosts: " + entry);
+                log.info("Successfully added to /etc/hosts: {}", entry);
             } else {
-                System.err.println("添加失败，退出码: " + exitCode);
+                log.error("Failed to add to /etc/hosts: {}", entry);
             }
         } catch (Exception e) {
-            System.err.println("执行命令时发生错误: " + e.getMessage());
+            log.error("Failed to add to /etc/hosts: {}", e.getMessage());
             e.printStackTrace();
         }
     }
