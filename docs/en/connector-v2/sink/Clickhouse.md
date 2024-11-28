@@ -89,7 +89,7 @@ The table creation statements will be generated based on the upstream data types
 
 Default template:
 ```sql
-CREATE TABLE IF NOT EXISTS `${database}`.`${table_name}` (
+CREATE TABLE IF NOT EXISTS `${database}`.`${table}` (
     ${rowtype_primary_key},
     ${rowtype_fields}
 ) ENGINE = MergeTree()
@@ -102,7 +102,7 @@ SETTINGS
 If custom fields are added to the template, for example, adding an `id` field:
 
 ```sql
-CREATE TABLE IF NOT EXISTS `${database}`.`${table_name}` (
+CREATE TABLE IF NOT EXISTS `${database}`.`${table}` (
     id,
     ${rowtype_fields}
 ) ENGINE = MergeTree()

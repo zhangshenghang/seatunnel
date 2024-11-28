@@ -89,7 +89,7 @@
 
 默认模板：
 ```sql
-CREATE TABLE IF NOT EXISTS  `${database}`.`${table_name}` (
+CREATE TABLE IF NOT EXISTS  `${database}`.`${table}` (
     ${rowtype_primary_key},
     ${rowtype_fields}
 ) ENGINE = MergeTree()
@@ -102,7 +102,7 @@ SETTINGS
 如果模板中填写了自定义字段，例如添加 id 字段
 
 ```sql
-CREATE TABLE IF NOT EXISTS  `${database}`.`${table_name}` (
+CREATE TABLE IF NOT EXISTS  `${database}`.`${table}` (
     id,
     ${rowtype_fields}
 ) ENGINE = MergeTree()

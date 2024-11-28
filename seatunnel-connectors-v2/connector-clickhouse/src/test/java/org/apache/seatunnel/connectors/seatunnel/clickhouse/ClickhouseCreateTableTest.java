@@ -60,7 +60,7 @@ public class ClickhouseCreateTableTest {
 
         String createTableSql =
                 ClickhouseCatalogUtil.INSTANCE.getCreateTableSql(
-                        "CREATE TABLE IF NOT EXISTS  `${database}`.`${table_name}` (\n"
+                        "CREATE TABLE IF NOT EXISTS  `${database}`.`${table}` (\n"
                                 + "    ${rowtype_primary_key},\n"
                                 + "    ${rowtype_fields}\n"
                                 + ") ENGINE = MergeTree()\n"
