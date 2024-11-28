@@ -8,7 +8,7 @@
 
 :::提示
 
-为了使用此连接器，您必须确保您的 Spark/Flink 集群已经集成了 Hive。测试过的 Hive 版本是 2.3.9。
+为了使用此连接器，您必须确保您的 Spark/Flink 集群已经集成了 Hive。测试过的 Hive 版本是 2.3.9 和 3.1.3。
 
 如果您使用 SeaTunnel 引擎，您需要将 `seatunnel-hadoop3-3.1.4-uber.jar`、`hive-exec-3.1.3.jar` 和 `libfb303-0.9.3.jar` 放在 `$SEATUNNEL_HOME/lib/` 目录中。
 :::
@@ -366,14 +366,3 @@ sink {
   }
 }
 ```
-
-## 更新日志
-
-### 2.2.0-beta 2022-09-26
-
-- 添加 Hive 源连接器
-
-### 下一个版本
-
-- [改进] 支持 Kerberos 认证 ([3840](https://github.com/apache/seatunnel/pull/3840))
-- 支持用户定义的分区 ([3842](https://github.com/apache/seatunnel/pull/3842))

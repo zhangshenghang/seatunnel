@@ -8,7 +8,7 @@
 
 :::提示
 
-为了使用此连接器，您必须确保您的 Spark/Flink 集群已经集成了 Hive。测试过的 Hive 版本是 2.3.9。
+为了使用此连接器，您必须确保您的 Spark/Flink 集群已经集成了 Hive。测试过的 Hive 版本是 2.3.9 和 3.1.3。
 
 如果您使用 SeaTunnel 引擎，您需要将 `seatunnel-hadoop3-3.1.4-uber.jar`、`hive-exec-3.1.3.jar` 和 `libfb303-0.9.3.jar` 放在 `$SEATUNNEL_HOME/lib/` 目录中。
 :::
@@ -463,25 +463,3 @@ sink {
   }
 }
 ```
-
-## 更新日志
-
-### 2.2.0-beta 2022-09-26
-
-- 添加 Hive Sink 连接器
-
-### 2.3.0-beta 2022-10-20
-
-- [改进] Hive Sink 支持自动分区修复 ([3133](https://github.com/apache/seatunnel/pull/3133))
-
-### 2.3.0 2022-12-30
-
-- [BugFix] 修复以下导致数据写入文件失败的错误 ([3258](https://github.com/apache/seatunnel/pull/3258))
-    - 当上游字段为空时会抛出 NullPointerException
-    - Sink 列映射失败
-    - 从状态恢复写入器时直接获取事务失败
-
-### 下一个版本
-
-- [改进] 支持 Kerberos 认证 ([3840](https://github.com/apache/seatunnel/pull/3840))
-- [改进] 添加 partition_dir_expression 验证逻辑 ([3886](https://github.com/apache/seatunnel/pull/3886))

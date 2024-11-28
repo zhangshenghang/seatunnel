@@ -8,7 +8,7 @@ Write data to Hive.
 
 :::tip
 
-In order to use this connector, You must ensure your spark/flink cluster already integrated hive. The tested hive version is 2.3.9.
+In order to use this connector, You must ensure your spark/flink cluster already integrated hive. The tested hive version is 2.3.9 and 3.1.3 .
 
 If you use SeaTunnel Engine, You need put seatunnel-hadoop3-3.1.4-uber.jar and hive-exec-3.1.3.jar and libfb303-0.9.3.jar in $SEATUNNEL_HOME/lib/ dir.
 :::
@@ -467,26 +467,3 @@ sink {
   }
 }
 ```
-
-## Changelog
-
-### 2.2.0-beta 2022-09-26
-
-- Add Hive Sink Connector
-
-### 2.3.0-beta 2022-10-20
-
-- [Improve] Hive Sink supports automatic partition repair ([3133](https://github.com/apache/seatunnel/pull/3133))
-
-### 2.3.0 2022-12-30
-
-- [BugFix] Fixed the following bugs that failed to write data to files ([3258](https://github.com/apache/seatunnel/pull/3258))
-  - When field from upstream is null it will throw NullPointerException
-  - Sink columns mapping failed
-  - When restore writer from states getting transaction directly failed
-
-### Next version
-
-- [Improve] Support kerberos authentication ([3840](https://github.com/apache/seatunnel/pull/3840))
-- [Improve] Added partition_dir_expression validation logic ([3886](https://github.com/apache/seatunnel/pull/3886))
-
