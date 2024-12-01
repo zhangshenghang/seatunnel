@@ -32,7 +32,6 @@ import com.hazelcast.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -208,10 +207,9 @@ public class ResourceRequestHandler {
 
     @VisibleForTesting
     public Optional<WorkerProfile> preCheckWorkerResource(ResourceProfile r) {
-        // Shuffle the order to ensure random selection of workers
         List<WorkerProfile> workerProfiles =
                 Arrays.asList(registerWorker.values().toArray(new WorkerProfile[0]));
-        Collections.shuffle(workerProfiles);
+
         // Check if there are still unassigned slots
         Optional<WorkerProfile> workerProfile =
                 workerProfiles.stream()
@@ -222,7 +220,12 @@ public class ResourceRequestHandler {
                                                         slot ->
                                                                 slot.getResourceProfile()
                                                                         .enoughThan(r)))
-                        .findAny();
+                        .min(
+                                (w1, w2) -> {
+                                    double usage1 = calculateSlotUsage(w1);
+                                    double usage2 = calculateSlotUsage(w2);
+                                    return Double.compare(usage1, usage2);
+                                });
 
         if (!workerProfile.isPresent()) {
             // Check if there are still unassigned resources
@@ -234,6 +237,23 @@ public class ResourceRequestHandler {
         }
 
         return workerProfile;
+    }
+
+    /**
+     * Calculate the slot usage rate of the worker
+     *
+     * @param worker WorkerProfile
+     * @return slot usage rate, range 0.0-1.0
+     */
+    private double calculateSlotUsage(WorkerProfile worker) {
+        int totalSlots = worker.getUnassignedSlots().length + worker.getAssignedSlots().length;
+        int unassignedSlots = worker.getUnassignedSlots().length;
+
+        if (totalSlots == 0) {
+            return 1.0;
+        }
+
+        return (double) (totalSlots - unassignedSlots) / totalSlots;
     }
 
     /**
