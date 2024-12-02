@@ -15,12 +15,15 @@
  * limitations under the License.
  */
 
-package org.apache.seatunnel.engine.common.config.server;
+package org.apache.seatunnel.engine.server.resourcemanager.resource;
+
+import lombok.Data;
 
 import java.io.Serializable;
+import java.util.LinkedHashMap;
 
-public enum AllocateStrategy implements Serializable {
-    SYSTEM_LOAD,
-    SLOT_RATIO,
-    RANDOM
+@Data
+public class SystemLoad implements Serializable {
+    private LinkedHashMap<String, Double> memMap;
+    private LinkedHashMap<String, Double> cpuMap;
 }

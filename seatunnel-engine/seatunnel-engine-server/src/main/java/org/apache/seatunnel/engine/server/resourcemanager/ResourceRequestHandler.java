@@ -24,6 +24,7 @@ import org.apache.seatunnel.engine.common.runtime.DeployType;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.RequestSlotOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.service.slot.SlotAndWorkerProfile;
 
@@ -33,8 +34,11 @@ import com.hazelcast.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -66,11 +70,14 @@ public class ResourceRequestHandler {
 
     private final AllocateStrategy allocateStrategy;
 
+    private final Map<Address, List<SystemLoad>> workerLoadMap;
+
     public ResourceRequestHandler(
             long jobId,
             List<ResourceProfile> resourceProfile,
             ConcurrentMap<Address, WorkerProfile> registerWorker,
-            AbstractResourceManager resourceManager) {
+            AbstractResourceManager resourceManager,
+            Map<Address, List<SystemLoad>> workerLoadMap) {
         this.completableFuture = new CompletableFuture<>();
         this.resultSlotProfiles = new ConcurrentHashMap<>();
         this.jobId = jobId;
@@ -79,6 +86,7 @@ public class ResourceRequestHandler {
         this.resourceManager = resourceManager;
         this.allocateStrategy =
                 resourceManager.getEngineConfig().getSlotServiceConfig().getAllocateStrategy();
+        this.workerLoadMap = workerLoadMap;
     }
 
     public CompletableFuture<List<SlotProfile>> request(Map<String, String> tags) {
@@ -211,12 +219,23 @@ public class ResourceRequestHandler {
                         }));
     }
 
+    private Double calculateWeight(WorkerProfile workerProfile) {
+        List<SystemLoad> systemLoads = workerLoadMap.get(workerProfile);
+        if (Objects.isNull(systemLoads) || systemLoads.isEmpty()) {
+            // If the node load is not obtained, zero is returned. This only happens when the
+            // service is just started and the load status has not yet been obtained.
+            return 0.0;
+        }
+        // TODO 计算当前权重
+        return 0.0;
+    }
+
     @VisibleForTesting
     public Optional<WorkerProfile> preCheckWorkerResource(ResourceProfile r) {
         List<WorkerProfile> workerProfiles =
                 Arrays.asList(registerWorker.values().toArray(new WorkerProfile[0]));
 
-        List<WorkerProfile> collect =
+        List<WorkerProfile> availableWorkers =
                 workerProfiles.stream()
                         .filter(
                                 worker ->
@@ -226,26 +245,26 @@ public class ResourceRequestHandler {
                                                                 slot.getResourceProfile()
                                                                         .enoughThan(r)))
                         .collect(Collectors.toList());
+
         Optional<WorkerProfile> workerProfile;
-        if (allocateStrategy == AllocateStrategy.SYSTEM_LOAD) {
-            workerProfile =
-                    collect.stream()
-                            .min(
-                                    (w1, w2) -> {
-                                        double systemLoad1 = w1.getSystemLoad();
-                                        double systemLoad2 = w2.getSystemLoad();
-                                        return Double.compare(systemLoad1, systemLoad2);
-                                    });
-        } else {
-            // 默认使用slot使用率策略，slot使用率越低，优先级越高
-            workerProfile =
-                    collect.stream()
-                            .min(
-                                    (w1, w2) -> {
-                                        double usage1 = calculateSlotUsage(w1);
-                                        double usage2 = calculateSlotUsage(w2);
-                                        return Double.compare(usage1, usage2);
-                                    });
+        switch (allocateStrategy) {
+            case SYSTEM_LOAD:
+                workerProfile =
+                        availableWorkers.stream()
+                                .max(Comparator.comparingDouble(this::calculateWeight));
+                break;
+            case RANDOM:
+                // Randomly obtain a worker
+                Collections.shuffle(availableWorkers);
+                workerProfile = availableWorkers.stream().findFirst();
+                break;
+            default:
+                // The slot usage rate strategy is used by default. The lower the slot usage rate,
+                // the
+                // higher the priority.
+                workerProfile =
+                        availableWorkers.stream()
+                                .min(Comparator.comparingDouble(this::calculateSlotUsage));
         }
 
         if (!workerProfile.isPresent()) {

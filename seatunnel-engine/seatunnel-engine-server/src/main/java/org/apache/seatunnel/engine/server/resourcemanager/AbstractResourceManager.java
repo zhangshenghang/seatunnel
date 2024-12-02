@@ -25,6 +25,7 @@ import org.apache.seatunnel.engine.server.resourcemanager.opeartion.SyncWorkerPr
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.WorkerSystemLoadOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.utils.NodeEngineUtil;
 
@@ -41,6 +42,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -68,11 +70,14 @@ public abstract class AbstractResourceManager implements ResourceManager {
 
     private static final long DEFAULT_SYSTEM_LOAD_PERIOD = 10000;
 
+    private Map<Address, List<SystemLoad>> workerLoadMap;
+
     public AbstractResourceManager(NodeEngine nodeEngine, EngineConfig engineConfig) {
         this.registerWorker = new ConcurrentHashMap<>();
         this.nodeEngine = nodeEngine;
         this.engineConfig = engineConfig;
         this.mode = engineConfig.getMode();
+        this.workerLoadMap = new ConcurrentHashMap<>();
     }
 
     @Override
@@ -131,18 +136,35 @@ public abstract class AbstractResourceManager implements ResourceManager {
                                                 sendToMember(new WorkerSystemLoadOperation(), node)
                                                         .thenAccept(
                                                                 systemLoad -> {
-                                                                    WorkerProfile workerProfile =
-                                                                            registerWorker.get(
-                                                                                    node);
-                                                                    if (workerProfile != null) {
-                                                                        workerProfile.setSystemLoad(
-                                                                                (Double)
+                                                                    if (Objects.nonNull(
+                                                                            systemLoad)) {
+                                                                        List<SystemLoad>
+                                                                                systemLoads =
+                                                                                        workerLoadMap
+                                                                                                .get(
+                                                                                                        node);
+                                                                        if (systemLoads == null) {
+                                                                            systemLoads =
+                                                                                    new ArrayList<>();
+                                                                            workerLoadMap.put(
+                                                                                    node,
+                                                                                    systemLoads);
+                                                                        }
+                                                                        if (systemLoads.size()
+                                                                                >= 5) {
+                                                                            systemLoads.remove(0);
+                                                                        }
+                                                                        systemLoads.add(
+                                                                                (SystemLoad)
                                                                                         systemLoad);
-                                                                        log.debug(
-                                                                                "Node:{} systemLoad:{}",
-                                                                                node,
-                                                                                systemLoad);
                                                                     }
+                                                                    log.debug(
+                                                                            "received system load from worker: "
+                                                                                    + node
+                                                                                    + ", system load: "
+                                                                                    + workerLoadMap
+                                                                                            .get(
+                                                                                                    node));
                                                                 }));
                     } catch (Exception e) {
                         log.warn(
@@ -206,7 +228,8 @@ public abstract class AbstractResourceManager implements ResourceManager {
             log.error("No matched worker with tag filter {}.", tagFilter);
             throw new NoEnoughResourceException();
         }
-        return new ResourceRequestHandler(jobId, resourceProfile, matchedWorker, this)
+        return new ResourceRequestHandler(
+                        jobId, resourceProfile, matchedWorker, this, workerLoadMap)
                 .request(tagFilter);
     }
 
@@ -293,11 +316,6 @@ public abstract class AbstractResourceManager implements ResourceManager {
         } else {
             log.debug("received worker heartbeat from: " + workerProfile.getAddress());
         }
-        workerProfile.setSystemLoad(
-                registerWorker.get(workerProfile.getAddress()) == null
-                        ? 0.0
-                        : registerWorker.get(workerProfile.getAddress()).getSystemLoad());
-        registerWorker.put(workerProfile.getAddress(), workerProfile);
     }
 
     @Override

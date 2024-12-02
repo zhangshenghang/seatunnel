@@ -25,7 +25,6 @@ import com.hazelcast.cluster.Address;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import lombok.AllArgsConstructor;
 import lombok.Data;
 
 import java.io.IOException;
@@ -51,14 +50,19 @@ public class WorkerProfile implements IdentifiedDataSerializable {
 
     private Map<String, String> attributes;
 
-    private double systemLoad;
-
     public WorkerProfile(Address address) {
         this.address = address;
         this.unassignedResource = new ResourceProfile();
     }
 
-    public WorkerProfile(Address address, ResourceProfile profile, ResourceProfile unassignedResource, boolean dynamicSlot, SlotProfile[] assignedSlots, SlotProfile[] unassignedSlots, Map<String, String> attributes) {
+    public WorkerProfile(
+            Address address,
+            ResourceProfile profile,
+            ResourceProfile unassignedResource,
+            boolean dynamicSlot,
+            SlotProfile[] assignedSlots,
+            SlotProfile[] unassignedSlots,
+            Map<String, String> attributes) {
         this.address = address;
         this.profile = profile;
         this.unassignedResource = unassignedResource;

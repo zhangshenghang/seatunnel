@@ -18,30 +18,76 @@
 package org.apache.seatunnel.engine.server.resourcemanager.opeartion;
 
 import org.apache.seatunnel.engine.server.SeaTunnelServer;
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
 import org.apache.seatunnel.engine.server.serializable.ResourceDataSerializerHook;
 
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
 import com.hazelcast.spi.impl.operationservice.Operation;
+import lombok.SneakyThrows;
+import oshi.SystemInfo;
+import oshi.hardware.CentralProcessor;
+import oshi.hardware.HardwareAbstractionLayer;
 
 import java.lang.management.ManagementFactory;
-import java.lang.management.OperatingSystemMXBean;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.MemoryUsage;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 
 /** Different from WorkerHeartbeatOperation, SystemLoad does not require frequent retrieval */
 public class WorkerSystemLoadOperation extends Operation implements IdentifiedDataSerializable {
 
-    public WorkerSystemLoadOperation() {}
+    private SystemLoad workerSystemLoad;
 
-    private Double systemLoadAverage;
+    public WorkerSystemLoadOperation() {
+        this.workerSystemLoad = new SystemLoad();
+    }
 
     @Override
     public void run() throws Exception {
-        OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
-        systemLoadAverage = osBean.getSystemLoadAverage();
+        String currentTime =
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        workerSystemLoad.setCpuMap(
+                new LinkedHashMap<>(Collections.singletonMap(currentTime, getCpuPercentage())));
+        workerSystemLoad.setMemMap(
+                new LinkedHashMap<>(Collections.singletonMap(currentTime, getMemPercentage())));
+    }
+
+    public double getMemPercentage() {
+        MemoryMXBean memoryMxBean = ManagementFactory.getMemoryMXBean();
+        MemoryUsage heapMemoryUsage = memoryMxBean.getHeapMemoryUsage();
+        return (heapMemoryUsage.getUsed() / (double) heapMemoryUsage.getMax()) * 100.0;
+    }
+
+    @SneakyThrows
+    public double getCpuPercentage() {
+        SystemInfo si = new SystemInfo();
+        HardwareAbstractionLayer hal = si.getHardware();
+        CentralProcessor processor = hal.getProcessor();
+        long[] prevTicks = processor.getSystemCpuLoadTicks();
+        Thread.sleep(1000);
+        long[] ticks = processor.getSystemCpuLoadTicks();
+        long user =
+                ticks[CentralProcessor.TickType.USER.getIndex()]
+                        - prevTicks[CentralProcessor.TickType.USER.getIndex()];
+        long nice =
+                ticks[CentralProcessor.TickType.NICE.getIndex()]
+                        - prevTicks[CentralProcessor.TickType.NICE.getIndex()];
+        long sys =
+                ticks[CentralProcessor.TickType.SYSTEM.getIndex()]
+                        - prevTicks[CentralProcessor.TickType.SYSTEM.getIndex()];
+        long idle =
+                ticks[CentralProcessor.TickType.IDLE.getIndex()]
+                        - prevTicks[CentralProcessor.TickType.IDLE.getIndex()];
+        long totalCpu = user + nice + sys + idle;
+        return ((totalCpu - idle) / (double) totalCpu) * 100.0;
     }
 
     @Override
     public Object getResponse() {
-        return systemLoadAverage;
+        return workerSystemLoad;
     }
 
     @Override
