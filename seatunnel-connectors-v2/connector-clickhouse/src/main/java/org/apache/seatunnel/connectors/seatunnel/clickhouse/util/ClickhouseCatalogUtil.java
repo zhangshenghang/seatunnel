@@ -24,7 +24,7 @@ import org.apache.seatunnel.connectors.seatunnel.common.util.CatalogUtil;
 
 import org.apache.commons.lang3.StringUtils;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.seatunnel.shade.com.google.common.base.Preconditions.checkNotNull;
 
 public class ClickhouseCatalogUtil extends CatalogUtil {
 
