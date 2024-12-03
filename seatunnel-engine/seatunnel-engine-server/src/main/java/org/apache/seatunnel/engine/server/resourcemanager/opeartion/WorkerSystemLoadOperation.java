@@ -49,10 +49,10 @@ public class WorkerSystemLoadOperation extends Operation implements IdentifiedDa
     public void run() throws Exception {
         String currentTime =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-        workerSystemLoad.setCpuMap(
-                new LinkedHashMap<>(Collections.singletonMap(currentTime, getCpuPercentage())));
-        workerSystemLoad.setMemMap(
-                new LinkedHashMap<>(Collections.singletonMap(currentTime, getMemPercentage())));
+        SystemLoad.SystemLoadInfo systemLoadInfo = new SystemLoad.SystemLoadInfo();
+        systemLoadInfo.setCpuPercentage( getCpuPercentage());
+        systemLoadInfo.setMemPercentage( getMemPercentage());
+        workerSystemLoad.setMetrics(new LinkedHashMap<>(Collections.singletonMap(currentTime,systemLoadInfo)));
     }
 
     public double getMemPercentage() {

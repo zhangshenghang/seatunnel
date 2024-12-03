@@ -40,6 +40,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -70,7 +71,7 @@ public abstract class AbstractResourceManager implements ResourceManager {
 
     private static final long DEFAULT_SYSTEM_LOAD_PERIOD = 10000;
 
-    private Map<Address, List<SystemLoad>> workerLoadMap;
+    private Map<Address, SystemLoad> workerLoadMap;
 
     public AbstractResourceManager(NodeEngine nodeEngine, EngineConfig engineConfig) {
         this.registerWorker = new ConcurrentHashMap<>();
@@ -138,25 +139,25 @@ public abstract class AbstractResourceManager implements ResourceManager {
                                                                 systemLoad -> {
                                                                     if (Objects.nonNull(
                                                                             systemLoad)) {
-                                                                        List<SystemLoad>
+                                                                        SystemLoad
                                                                                 systemLoads =
                                                                                         workerLoadMap
                                                                                                 .get(
                                                                                                         node);
                                                                         if (systemLoads == null) {
-                                                                            systemLoads =
-                                                                                    new ArrayList<>();
+                                                                            systemLoads = new SystemLoad();
                                                                             workerLoadMap.put(
                                                                                     node,
                                                                                     systemLoads);
                                                                         }
-                                                                        if (systemLoads.size()
+                                                                        LinkedHashMap<String, SystemLoad.SystemLoadInfo> metrics = systemLoads.getMetrics();
+                                                                        if (metrics.size()
                                                                                 >= 5) {
-                                                                            systemLoads.remove(0);
+                                                                            metrics.remove(0);
                                                                         }
-                                                                        systemLoads.add(
-                                                                                (SystemLoad)
-                                                                                        systemLoad);
+                                                                        metrics.putAll(
+                                                                                ((SystemLoad)systemLoad)
+                                                                                        .getMetrics());
                                                                     }
                                                                     log.debug(
                                                                             "received system load from worker: "

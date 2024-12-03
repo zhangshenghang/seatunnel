@@ -24,6 +24,11 @@ import java.util.LinkedHashMap;
 
 @Data
 public class SystemLoad implements Serializable {
-    private LinkedHashMap<String, Double> memMap;
-    private LinkedHashMap<String, Double> cpuMap;
+    private LinkedHashMap<String, SystemLoadInfo> metrics;
+
+    @Data
+    public static class SystemLoadInfo{
+        private Double memPercentage;
+        private Double cpuPercentage;
+    }
 }

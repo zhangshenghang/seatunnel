@@ -70,14 +70,14 @@ public class ResourceRequestHandler {
 
     private final AllocateStrategy allocateStrategy;
 
-    private final Map<Address, List<SystemLoad>> workerLoadMap;
+    private final Map<Address, SystemLoad> workerLoadMap;
 
     public ResourceRequestHandler(
             long jobId,
             List<ResourceProfile> resourceProfile,
             ConcurrentMap<Address, WorkerProfile> registerWorker,
             AbstractResourceManager resourceManager,
-            Map<Address, List<SystemLoad>> workerLoadMap) {
+            Map<Address, SystemLoad> workerLoadMap) {
         this.completableFuture = new CompletableFuture<>();
         this.resultSlotProfiles = new ConcurrentHashMap<>();
         this.jobId = jobId;
@@ -220,8 +220,8 @@ public class ResourceRequestHandler {
     }
 
     private Double calculateWeight(WorkerProfile workerProfile) {
-        List<SystemLoad> systemLoads = workerLoadMap.get(workerProfile);
-        if (Objects.isNull(systemLoads) || systemLoads.isEmpty()) {
+        SystemLoad systemLoads = workerLoadMap.get(workerProfile);
+        if (Objects.isNull(systemLoads) || systemLoads.getMetrics().isEmpty()) {
             // If the node load is not obtained, zero is returned. This only happens when the
             // service is just started and the load status has not yet been obtained.
             return 0.0;
