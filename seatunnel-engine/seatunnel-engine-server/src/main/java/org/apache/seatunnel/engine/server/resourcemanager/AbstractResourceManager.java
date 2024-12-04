@@ -89,14 +89,14 @@ public abstract class AbstractResourceManager implements ResourceManager {
 
     private void initWorker() {
         log.info("initWorker... ");
-        scheduledExecutorService =
-                Executors.newSingleThreadScheduledExecutor(
-                        r ->
-                                new Thread(
-                                        r,
-                                        String.format(
-                                                "hz.%s.seaTunnel.ResourceManager.thread",
-                                                nodeEngine.getHazelcastInstance().getName())));
+//        scheduledExecutorService =
+//                Executors.newSingleThreadScheduledExecutor(
+//                        r ->
+//                                new Thread(
+//                                        r,
+//                                        String.format(
+//                                                "hz.%s.seaTunnel.ResourceManager.thread",
+//                                                nodeEngine.getHazelcastInstance().getName())));
         List<Address> aliveNode =
                 nodeEngine.getClusterService().getMembers().stream()
                         .map(Member::getAddress)
@@ -122,60 +122,66 @@ public abstract class AbstractResourceManager implements ResourceManager {
                         .collect(Collectors.toList());
         futures.forEach(CompletableFuture::join);
 
-        scheduledExecutorService.scheduleAtFixedRate(
-                () -> {
-                    try {
-                        log.debug(
-                                "start send system load to resource manager, this address: "
-                                        + nodeEngine.getClusterService().getThisAddress());
-                        nodeEngine.getClusterService().getMembers().stream()
-                                .map(Member::getAddress)
-                                .collect(Collectors.toList())
-                                .stream()
-                                .forEach(
-                                        node ->
-                                                sendToMember(new WorkerSystemLoadOperation(), node)
-                                                        .thenAccept(
-                                                                systemLoad -> {
-                                                                    if (Objects.nonNull(
-                                                                            systemLoad)) {
-                                                                        SystemLoad
-                                                                                systemLoads =
-                                                                                        workerLoadMap
-                                                                                                .get(
-                                                                                                        node);
-                                                                        if (systemLoads == null) {
-                                                                            systemLoads = new SystemLoad();
-                                                                            workerLoadMap.put(
-                                                                                    node,
-                                                                                    systemLoads);
-                                                                        }
-                                                                        LinkedHashMap<String, SystemLoad.SystemLoadInfo> metrics = systemLoads.getMetrics();
-                                                                        if (metrics.size()
-                                                                                >= 5) {
-                                                                            metrics.remove(0);
-                                                                        }
-                                                                        metrics.putAll(
-                                                                                ((SystemLoad)systemLoad)
-                                                                                        .getMetrics());
-                                                                    }
-                                                                    log.debug(
-                                                                            "received system load from worker: "
-                                                                                    + node
-                                                                                    + ", system load: "
-                                                                                    + workerLoadMap
-                                                                                            .get(
-                                                                                                    node));
-                                                                }));
-                    } catch (Exception e) {
-                        log.warn(
-                                "failed send system load to resource manager, will retry later. this address: "
-                                        + nodeEngine.getClusterService().getThisAddress());
-                    }
-                },
-                0,
-                DEFAULT_SYSTEM_LOAD_PERIOD,
-                TimeUnit.MILLISECONDS);
+//        scheduledExecutorService.scheduleAtFixedRate(
+//                () -> {
+//                    try {
+//                        log.debug(
+//                                "start send system load to resource manager, this address: "
+//                                        + nodeEngine.getClusterService().getThisAddress());
+//                        nodeEngine.getClusterService().getMembers().stream()
+//                                .map(Member::getAddress)
+//                                .collect(Collectors.toList())
+//                                .stream()
+//                                .forEach(
+//                                        node ->
+//                                                sendToMember(new WorkerSystemLoadOperation(), node)
+//                                                        .thenAccept(
+//                                                                systemLoad -> {
+//                                                                    if (Objects.nonNull(
+//                                                                            systemLoad)) {
+//                                                                        SystemLoad
+//                                                                                systemLoads =
+//                                                                                        workerLoadMap
+//                                                                                                .get(
+//                                                                                                        node);
+//                                                                        if (systemLoads == null) {
+//                                                                            systemLoads = new SystemLoad();
+//                                                                            workerLoadMap.put(
+//                                                                                    node,
+//                                                                                    systemLoads);
+//                                                                        }
+//                                                                        LinkedHashMap<String, SystemLoad.SystemLoadInfo> metrics = systemLoads.getMetrics();
+//                                                                        if(metrics == null) {
+//                                                                            metrics = new LinkedHashMap<>();
+//                                                                        }
+//                                                                        if (metrics.size()
+//                                                                                >= 5) {
+//                                                                            metrics.remove(0);
+//                                                                        }
+//                                                                        workerLoadMap.put(
+//                                                                                node,
+//                                                                                systemLoads);
+//                                                                        metrics.putAll(
+//                                                                                ((SystemLoad)systemLoad)
+//                                                                                        .getMetrics());
+//                                                                    }
+//                                                                    log.debug(
+//                                                                            "received system load from worker: "
+//                                                                                    + node
+//                                                                                    + ", system load: "
+//                                                                                    + workerLoadMap
+//                                                                                            .get(
+//                                                                                                    node));
+//                                                                }));
+//                    } catch (Exception e) {
+//                        log.warn(
+//                                "failed send system load to resource manager, will retry later. this address: "
+//                                        + nodeEngine.getClusterService().getThisAddress());
+//                    }
+//                },
+//                0,
+//                DEFAULT_SYSTEM_LOAD_PERIOD,
+//                TimeUnit.MILLISECONDS);
         log.info("registerWorker: {}", registerWorker);
     }
 
@@ -317,6 +323,7 @@ public abstract class AbstractResourceManager implements ResourceManager {
         } else {
             log.debug("received worker heartbeat from: " + workerProfile.getAddress());
         }
+        registerWorker.put(workerProfile.getAddress(), workerProfile);
     }
 
     @Override

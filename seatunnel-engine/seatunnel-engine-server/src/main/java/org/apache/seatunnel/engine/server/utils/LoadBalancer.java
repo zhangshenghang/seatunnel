@@ -1,6 +1,13 @@
 package org.apache.seatunnel.engine.server.utils;
 
+import com.hazelcast.cluster.Address;
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
+import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
+import scala.Tuple2;
+
 import java.util.LinkedList;
+import java.util.Map;
+import java.util.Objects;
 
 public class LoadBalancer {
     // 配置部分
@@ -91,6 +98,32 @@ public class LoadBalancer {
         return prioritySum;
     }
 
+    public double calculate(SystemLoad systemLoads, WorkerProfile workerProfile, Map<Address, Tuple2<Double,Integer>> workerAssignedSlots){
+        if (Objects.isNull(systemLoads) || systemLoads.getMetrics().isEmpty()) {
+            // If the node load is not obtained, zero is returned. This only happens when the
+            // service is just started and the load status has not yet been obtained.
+            return 0.0;
+        }
+        systemLoads.getMetrics().forEach((k, v) ->
+        {
+            Double cpuPercentage = v.getCpuPercentage();
+            Double memPercentage = v.getMemPercentage();
+            this.addUtilizationData(cpuPercentage, memPercentage);
+        });
+        // 第三步计算出的综合资源空闲率
+        double comprehensiveResourceAvailability = this.calculateSchedulingPriority();
+        // 第四步结果
+        double resourceAvailabilityStep4 = this.calculateComprehensiveResourceAvailability(comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
+        // 开始计算第五步，平衡因子
+        double slotWeight = this.balanceFactor(workerProfile);
+        double result = this.calculateResourceAvailability(resourceAvailabilityStep4, slotWeight);
+        return result;
+    }
+
+    public double calculateResourceAvailability(double resourceAvailabilityStep4,double slotWeight) {
+        return 0.7 * resourceAvailabilityStep4 + 0.3 * slotWeight;
+    }
+
     /**
      * 计算单个时间点的资源可用性
      */
@@ -100,6 +133,40 @@ public class LoadBalancer {
 
         return (cpuAvailability * CPU_WEIGHT + memoryAvailability * MEMORY_WEIGHT)
                 / (CPU_WEIGHT + MEMORY_WEIGHT);
+    }
+
+    /**
+     * 第四步计算出的综合资源空闲率
+     * @return
+     */
+    public double calculateComprehensiveResourceAvailability(double comprehensiveResourceAvailability,
+                                                              WorkerProfile workerProfile,
+                                                             Map<Address, Tuple2<Double,Integer>> workerAssignedSlots){
+        // 开始第四步
+        // 已经分配的 Slot 数量
+        int assignedSlotsNum = workerProfile.getAssignedSlots().length;
+        // 单个 Slot 使用的资源，默认 0.1
+        double singleSlotUseResource = 0.1;
+        Tuple2<Double, Integer> tuple2 = null;
+        if(workerAssignedSlots.get(workerProfile.getAddress()) == null){
+            if(assignedSlotsNum != 0 ){
+                singleSlotUseResource = Math.round(((1.0 - comprehensiveResourceAvailability) / assignedSlotsNum) * 100.0) / 100.0;
+            }
+            tuple2 = workerAssignedSlots.getOrDefault(workerProfile.getAddress(), new Tuple2<>(singleSlotUseResource, 0));
+        }else{
+            tuple2 = workerAssignedSlots.get(workerProfile.getAddress());
+            singleSlotUseResource = tuple2._1;
+        }
+        // 当前任务在 Worker 节点已经申请的次数
+        workerAssignedSlots.put(workerProfile.getAddress(), new Tuple2<>(tuple2._1, tuple2._2+1));
+        Integer assignedTimesForTask = tuple2._2;
+        // 计算当前任务在 Worker 节点的权重，第四步计算完成
+        comprehensiveResourceAvailability = comprehensiveResourceAvailability - (assignedTimesForTask * singleSlotUseResource);
+        return comprehensiveResourceAvailability;
+    }
+
+    public double balanceFactor(WorkerProfile workerProfile){
+        return 1.0 - ((double)workerProfile.getAssignedSlots().length / (workerProfile.getAssignedSlots().length + workerProfile.getUnassignedSlots().length));
     }
 
     // 测试方法

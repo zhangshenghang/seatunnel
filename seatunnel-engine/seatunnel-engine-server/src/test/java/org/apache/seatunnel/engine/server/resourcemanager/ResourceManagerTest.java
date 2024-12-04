@@ -29,11 +29,13 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import com.hazelcast.cluster.Address;
+import scala.Tuple2;
 
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -202,7 +204,7 @@ public class ResourceManagerTest extends AbstractSeaTunnelServerTest<ResourceMan
                                 registerWorker,
                                 (AbstractResourceManager) this.resourceManager,
                                 null)
-                        .preCheckWorkerResource(new ResourceProfile());
+                        .preCheckWorkerResource(new ResourceProfile(),new ConcurrentHashMap<>());
         Assertions.assertEquals(result.isPresent(), dynamicSlot);
     }
 }

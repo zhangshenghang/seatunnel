@@ -17,7 +17,9 @@
 
 package org.apache.seatunnel.engine.server.resourcemanager.resource;
 
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
 import java.util.LinkedHashMap;
@@ -26,8 +28,11 @@ import java.util.LinkedHashMap;
 public class SystemLoad implements Serializable {
     private LinkedHashMap<String, SystemLoadInfo> metrics;
 
+    @AllArgsConstructor
+    @NoArgsConstructor
     @Data
-    public static class SystemLoadInfo{
+    public static class SystemLoadInfo implements Serializable{
+
         private Double memPercentage;
         private Double cpuPercentage;
     }

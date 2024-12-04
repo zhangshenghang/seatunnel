@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.engine.server.resourcemanager;
 
+import org.apache.seatunnel.engine.server.utils.LoadBalancer;
 import org.apache.seatunnel.shade.com.google.common.annotations.VisibleForTesting;
 
 import org.apache.seatunnel.engine.common.config.server.AllocateStrategy;
@@ -31,6 +32,7 @@ import org.apache.seatunnel.engine.server.service.slot.SlotAndWorkerProfile;
 import com.hazelcast.cluster.Address;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
+import scala.Tuple2;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -38,7 +40,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -158,9 +159,11 @@ public class ResourceRequestHandler {
     private List<CompletableFuture<SlotAndWorkerProfile>> requestSlots(
             List<ResourceProfile> requestProfile) {
         List<CompletableFuture<SlotAndWorkerProfile>> allRequestFuture = new ArrayList<>();
+        // Tuple2 <单个节点推算的使用比例，次数>
+        Map<Address, Tuple2<Double,Integer>> workerAssignedSlots = new ConcurrentHashMap<>();
         for (int i = 0; i < requestProfile.size(); i++) {
             ResourceProfile r = requestProfile.get(i);
-            Optional<WorkerProfile> workerProfile = preCheckWorkerResource(r);
+            Optional<WorkerProfile> workerProfile = preCheckWorkerResource(r,workerAssignedSlots);
             if (workerProfile.isPresent()) {
                 // request slot to member
                 CompletableFuture<SlotAndWorkerProfile> internalCompletableFuture =
@@ -219,19 +222,13 @@ public class ResourceRequestHandler {
                         }));
     }
 
-    private Double calculateWeight(WorkerProfile workerProfile) {
-        SystemLoad systemLoads = workerLoadMap.get(workerProfile);
-        if (Objects.isNull(systemLoads) || systemLoads.getMetrics().isEmpty()) {
-            // If the node load is not obtained, zero is returned. This only happens when the
-            // service is just started and the load status has not yet been obtained.
-            return 0.0;
-        }
-        // TODO 计算当前权重
-        return 0.0;
+    public Double calculateWeight(WorkerProfile workerProfile,Map<Address, Tuple2<Double,Integer>> workerAssignedSlots) {
+        LoadBalancer loadBalancer = new LoadBalancer();
+        return loadBalancer.calculate(workerLoadMap.get(workerProfile.getAddress()), workerProfile, workerAssignedSlots);
     }
 
     @VisibleForTesting
-    public Optional<WorkerProfile> preCheckWorkerResource(ResourceProfile r) {
+    public Optional<WorkerProfile> preCheckWorkerResource(ResourceProfile r,Map<Address, Tuple2<Double,Integer>> workerAssignedSlots) {
         List<WorkerProfile> workerProfiles =
                 Arrays.asList(registerWorker.values().toArray(new WorkerProfile[0]));
 
@@ -251,7 +248,10 @@ public class ResourceRequestHandler {
             case SYSTEM_LOAD:
                 workerProfile =
                         availableWorkers.stream()
-                                .max(Comparator.comparingDouble(this::calculateWeight));
+                                .min(
+                                        (w1, w2) -> {
+                                          return Double.compare(calculateWeight(w1,workerAssignedSlots), calculateWeight(w2,workerAssignedSlots));
+                                        });
                 break;
             case RANDOM:
                 // Randomly obtain a worker
