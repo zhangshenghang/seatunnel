@@ -377,7 +377,8 @@ public class JobMaster {
         // 主要用于两个场景：
         // 1. 基于 SYSTEM_LOAD 策略时，系统负载无法动态变化，需要计算推理每个 Slot 使用的资源
         // 2. 基于 SLOT_RATIO 策略时，registerWorker 也不是实时更新的，用于记录的 Slot 申请状态
-        ((AbstractResourceManager)resourceManager).setWorkerAssignedSlots(new ConcurrentHashMap<>());
+        ((AbstractResourceManager) resourceManager)
+                .setWorkerAssignedSlots(new ConcurrentHashMap<>());
 
         Map<TaskGroupLocation, CompletableFuture<SlotProfile>> preApplyResourceFutures =
                 new HashMap<>();

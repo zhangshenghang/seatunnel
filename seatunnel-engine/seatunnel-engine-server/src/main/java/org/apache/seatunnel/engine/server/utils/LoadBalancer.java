@@ -1,9 +1,11 @@
 package org.apache.seatunnel.engine.server.utils;
 
-import com.hazelcast.cluster.Address;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
-import scala.Tuple2;
+
+import org.apache.commons.lang3.tuple.ImmutableTriple;
+
+import com.hazelcast.cluster.Address;
 
 import java.util.LinkedList;
 import java.util.Map;
@@ -34,13 +36,13 @@ public class LoadBalancer {
         this.utilizationHistory = new LinkedList<>();
     }
 
-    /**
-     * 添加新的资源利用率数据
-     */
+    /** 添加新的资源利用率数据 */
     public void addUtilizationData(double cpuUtilization, double memoryUtilization) {
         // 验证输入数据的有效性
-        if (cpuUtilization < 0 || cpuUtilization > 1 ||
-                memoryUtilization < 0 || memoryUtilization > 1) {
+        if (cpuUtilization < 0
+                || cpuUtilization > 1
+                || memoryUtilization < 0
+                || memoryUtilization > 1) {
             throw new IllegalArgumentException("Utilization values must be between 0 and 1");
         }
 
@@ -50,9 +52,7 @@ public class LoadBalancer {
         utilizationHistory.addFirst(new UtilizationData(cpuUtilization, memoryUtilization));
     }
 
-    /**
-     * 根据实际记录数生成对应的时间权重
-     */
+    /** 根据实际记录数生成对应的时间权重 */
     private double[] generateTimeWeights() {
         int size = utilizationHistory.size();
         if (size == 0) return new double[0];
@@ -64,7 +64,8 @@ public class LoadBalancer {
 
         // 按照配置的比例分配权重
         for (int i = 0; i < size; i++) {
-            weights[i] = (i < weightCount) ? TIME_WEIGHT_RATIOS[i] : TIME_WEIGHT_RATIOS[weightCount - 1];
+            weights[i] =
+                    (i < weightCount) ? TIME_WEIGHT_RATIOS[i] : TIME_WEIGHT_RATIOS[weightCount - 1];
             totalWeight += weights[i];
         }
 
@@ -76,9 +77,7 @@ public class LoadBalancer {
         return weights;
     }
 
-    /**
-     * 计算调度优先级
-     */
+    /** 计算调度优先级 */
     public double calculateSchedulingPriority() {
         if (utilizationHistory.isEmpty()) {
             return 1.0; // 如果没有历史数据，返回最高优先级
@@ -98,36 +97,54 @@ public class LoadBalancer {
         return prioritySum;
     }
 
-    public double calculate(SystemLoad systemLoads, WorkerProfile workerProfile, Map<Address, Tuple2<Double,Integer>> workerAssignedSlots){
+    public double calculate(
+            SystemLoad systemLoads,
+            WorkerProfile workerProfile,
+            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
         if (Objects.isNull(systemLoads) || systemLoads.getMetrics().isEmpty()) {
             // If the node load is not obtained, zero is returned. This only happens when the
             // service is just started and the load status has not yet been obtained.
             return 0.0;
         }
-        systemLoads.getMetrics().forEach((k, v) ->
-        {
-            Double cpuPercentage = v.getCpuPercentage();
-            Double memPercentage = v.getMemPercentage();
-            this.addUtilizationData(cpuPercentage, memPercentage);
-        });
+        systemLoads
+                .getMetrics()
+                .forEach(
+                        (k, v) -> {
+                            Double cpuPercentage = v.getCpuPercentage();
+                            Double memPercentage = v.getMemPercentage();
+                            this.addUtilizationData(cpuPercentage, memPercentage);
+                        });
         // 第三步计算出的综合资源空闲率
         double comprehensiveResourceAvailability = this.calculateSchedulingPriority();
         // 第四步结果
-        double resourceAvailabilityStep4 = this.calculateComprehensiveResourceAvailability(comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
+        double resourceAvailabilityStep4 =
+                this.calculateComprehensiveResourceAvailability(
+                        comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
         // 开始计算第五步，平衡因子
-        double slotWeight = this.balanceFactor(workerProfile,workerAssignedSlots);
+        double slotWeight = this.balanceFactor(workerProfile, workerAssignedSlots);
         double result = this.calculateResourceAvailability(resourceAvailabilityStep4, slotWeight);
-        System.out.println("node:"+workerProfile.getAddress()+"mem:"+systemLoads.getMetrics()+" 第三步："+comprehensiveResourceAvailability+" 第四步："+resourceAvailabilityStep4+" 第五步："+slotWeight+" 最终结果："+result);
+        System.out.println(
+                "node:"
+                        + workerProfile.getAddress()
+                        + "mem:"
+                        + systemLoads.getMetrics()
+                        + " 第三步："
+                        + comprehensiveResourceAvailability
+                        + " 第四步："
+                        + resourceAvailabilityStep4
+                        + " 第五步："
+                        + slotWeight
+                        + " 最终结果："
+                        + result);
         return result;
     }
 
-    public double calculateResourceAvailability(double resourceAvailabilityStep4,double slotWeight) {
+    public double calculateResourceAvailability(
+            double resourceAvailabilityStep4, double slotWeight) {
         return 0.7 * resourceAvailabilityStep4 + 0.3 * slotWeight;
     }
 
-    /**
-     * 计算单个时间点的资源可用性
-     */
+    /** 计算单个时间点的资源可用性 */
     private double calculateResourceAvailability(UtilizationData data) {
         double cpuAvailability = 1.0 - data.cpuUtilization;
         double memoryAvailability = 1.0 - data.memoryUtilization;
@@ -138,50 +155,63 @@ public class LoadBalancer {
 
     /**
      * 第四步计算出的综合资源空闲率
+     *
      * @return
      */
-    public double calculateComprehensiveResourceAvailability(double comprehensiveResourceAvailability,
-                                                              WorkerProfile workerProfile,
-                                                             Map<Address, Tuple2<Double,Integer>> workerAssignedSlots){
+    public double calculateComprehensiveResourceAvailability(
+            double comprehensiveResourceAvailability,
+            WorkerProfile workerProfile,
+            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
         // 开始第四步
         // 已经分配的 Slot 数量
         int assignedSlotsNum = workerProfile.getAssignedSlots().length;
         // 单个 Slot 使用的资源，默认 0.1
         double singleSlotUseResource = 0.1;
-        Tuple2<Double, Integer> tuple2 = null;
-        if(workerAssignedSlots.get(workerProfile.getAddress()) == null){
-            if(assignedSlotsNum != 0 ){
-                singleSlotUseResource = Math.round(((1.0 - comprehensiveResourceAvailability) / assignedSlotsNum) * 100.0) / 100.0;
+        ImmutableTriple<Double, Integer, Integer> tuple2 = null;
+        if (workerAssignedSlots.get(workerProfile.getAddress()) == null) {
+            if (assignedSlotsNum != 0) {
+                singleSlotUseResource =
+                        Math.round(
+                                        ((1.0 - comprehensiveResourceAvailability)
+                                                        / assignedSlotsNum)
+                                                * 100.0)
+                                / 100.0;
             }
-            tuple2 = workerAssignedSlots.getOrDefault(workerProfile.getAddress(), new Tuple2<>(singleSlotUseResource, 0));
-        }else{
+            tuple2 =
+                    workerAssignedSlots.getOrDefault(
+                            workerProfile.getAddress(),
+                            new ImmutableTriple<>(singleSlotUseResource, 0, assignedSlotsNum));
+        } else {
             tuple2 = workerAssignedSlots.get(workerProfile.getAddress());
-            singleSlotUseResource = tuple2._1;
+            singleSlotUseResource = tuple2.left;
         }
 
-        Integer assignedTimesForTask = tuple2._2;
+        Integer assignedTimesForTask = tuple2.middle;
         System.out.println(assignedTimesForTask);
         // 计算当前任务在 Worker 节点的权重，第四步计算完成
-        comprehensiveResourceAvailability = comprehensiveResourceAvailability - (assignedTimesForTask * singleSlotUseResource);
+        comprehensiveResourceAvailability =
+                comprehensiveResourceAvailability - (assignedTimesForTask * singleSlotUseResource);
         return comprehensiveResourceAvailability;
     }
 
-    public double balanceFactor(WorkerProfile workerProfile, Map<Address, Tuple2<Double,Integer>> workerAssignedSlots){
-        Tuple2<Double, Integer> tuple2 = workerAssignedSlots.get(workerProfile.getAddress());
-        if(tuple2!=null) {
-            Integer assignedSlots = workerProfile.getAssignedSlots().length + tuple2._2;
-            while (assignedSlots > (workerProfile.getAssignedSlots().length + workerProfile.getUnassignedSlots().length)) {
-                assignedSlots--;
-            }
-            System.out.println("已分配：" + assignedSlots);
-            return balanceFactor(workerProfile, assignedSlots);
-        }else{
+    public double balanceFactor(
+            WorkerProfile workerProfile,
+            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
+        ImmutableTriple<Double, Integer, Integer> tuple2 =
+                workerAssignedSlots.get(workerProfile.getAddress());
+        if (tuple2 != null) {
+            System.out.println("已分配：" + tuple2.middle + tuple2.right);
+            return balanceFactor(workerProfile, tuple2.middle + tuple2.right);
+        } else {
             return balanceFactor(workerProfile, workerProfile.getAssignedSlots().length);
         }
     }
 
-    public double balanceFactor(WorkerProfile workerProfile, Integer assignedSlots){
-        return 1.0 - ((double)assignedSlots / (workerProfile.getAssignedSlots().length + workerProfile.getUnassignedSlots().length));
+    public double balanceFactor(WorkerProfile workerProfile, Integer assignedSlots) {
+        return 1.0
+                - ((double) assignedSlots
+                        / (workerProfile.getAssignedSlots().length
+                                + workerProfile.getUnassignedSlots().length));
     }
 
     // 测试方法
@@ -193,7 +223,8 @@ public class LoadBalancer {
         loadBalancer.addUtilizationData(0.6, 0.5); // 最老
         loadBalancer.addUtilizationData(0.7, 0.6);
         loadBalancer.addUtilizationData(0.5, 0.4); // 最新
-        System.out.printf("Priority (3 records): %.4f%n", loadBalancer.calculateSchedulingPriority());
+        System.out.printf(
+                "Priority (3 records): %.4f%n", loadBalancer.calculateSchedulingPriority());
 
         // 测试不同数量记录的权重分布
         double[] weights = loadBalancer.generateTimeWeights();

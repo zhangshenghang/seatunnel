@@ -31,7 +31,7 @@ public class SystemLoad implements Serializable {
     @AllArgsConstructor
     @NoArgsConstructor
     @Data
-    public static class SystemLoadInfo implements Serializable{
+    public static class SystemLoadInfo implements Serializable {
 
         private Double memPercentage;
         private Double cpuPercentage;

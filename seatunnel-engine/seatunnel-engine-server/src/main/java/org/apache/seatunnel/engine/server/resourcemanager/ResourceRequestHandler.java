@@ -17,7 +17,6 @@
 
 package org.apache.seatunnel.engine.server.resourcemanager;
 
-import org.apache.seatunnel.engine.server.utils.LoadBalancer;
 import org.apache.seatunnel.shade.com.google.common.annotations.VisibleForTesting;
 
 import org.apache.seatunnel.engine.common.config.server.AllocateStrategy;
@@ -28,11 +27,13 @@ import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.service.slot.SlotAndWorkerProfile;
+import org.apache.seatunnel.engine.server.utils.LoadBalancer;
+
+import org.apache.commons.lang3.tuple.ImmutableTriple;
 
 import com.hazelcast.cluster.Address;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
-import scala.Tuple2;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -72,8 +73,9 @@ public class ResourceRequestHandler {
     private final AllocateStrategy allocateStrategy;
 
     private final Map<Address, SystemLoad> workerLoadMap;
-    // Tuple2 <单个节点推算的使用比例，次数>
-    private final Map<Address, Tuple2<Double,Integer>> workerAssignedSlots;
+    // Tuple2 <单个节点推算的使用资源比例，申请 slot 次数，资源申请前记录的次数>
+    //    private final Map<Address, Tuple2<Double,Integer>> workerAssignedSlots;
+    private final Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
 
     public ResourceRequestHandler(
             long jobId,
@@ -121,7 +123,7 @@ public class ResourceRequestHandler {
                                     } else {
                                         List<ResourceProfile> needRequestResource =
                                                 stillNeedRequestResource();
-                                        System.out.println("异常了+="+needRequestResource.isEmpty());
+                                        System.out.println("异常了+=" + needRequestResource.isEmpty());
                                         if (!needRequestResource.isEmpty()) {
                                             Exception requestSlotWithRetryError = null;
                                             try {
@@ -225,9 +227,12 @@ public class ResourceRequestHandler {
                         }));
     }
 
-    public Double calculateWeight(WorkerProfile workerProfile,Map<Address, Tuple2<Double,Integer>> workerAssignedSlots) {
+    public Double calculateWeight(
+            WorkerProfile workerProfile,
+            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
         LoadBalancer loadBalancer = new LoadBalancer();
-        return loadBalancer.calculate(workerLoadMap.get(workerProfile.getAddress()), workerProfile, workerAssignedSlots);
+        return loadBalancer.calculate(
+                workerLoadMap.get(workerProfile.getAddress()), workerProfile, workerAssignedSlots);
     }
 
     @VisibleForTesting
@@ -249,25 +254,49 @@ public class ResourceRequestHandler {
         Optional<WorkerProfile> workerProfile;
         switch (allocateStrategy) {
             case SYSTEM_LOAD:
-            workerProfile =
-                    availableWorkers.stream()
-                            .max(
-                                    (w1, w2) -> {
-                                        double weight1 = calculateWeight(w1, workerAssignedSlots);
-                                        double weight2 = calculateWeight(w2, workerAssignedSlots);
-                                        System.out.println("Comparing weights: "+w1.getAddress()+"=" + weight1 + ", "+w2.getAddress()+"=" + weight2);
-                                        LOGGER.fine("Comparing weights: "+w1.getAddress()+"=" + weight1 + ", "+w2.getAddress()+"=" + weight2);
-                                        return Double.compare(weight1, weight2);
-                                    });
+                workerProfile =
+                        availableWorkers.stream()
+                                .max(
+                                        (w1, w2) -> {
+                                            double weight1 =
+                                                    calculateWeight(w1, workerAssignedSlots);
+                                            double weight2 =
+                                                    calculateWeight(w2, workerAssignedSlots);
+                                            System.out.println(
+                                                    "Comparing weights: "
+                                                            + w1.getAddress()
+                                                            + "="
+                                                            + weight1
+                                                            + ", "
+                                                            + w2.getAddress()
+                                                            + "="
+                                                            + weight2);
+                                            LOGGER.fine(
+                                                    "Comparing weights: "
+                                                            + w1.getAddress()
+                                                            + "="
+                                                            + weight1
+                                                            + ", "
+                                                            + w2.getAddress()
+                                                            + "="
+                                                            + weight2);
+                                            return Double.compare(weight1, weight2);
+                                        });
                 // 当前任务在 Worker 节点已经申请的次数
-                if(workerAssignedSlots.get(workerProfile.get().getAddress()) == null) {
-                    workerAssignedSlots.put(workerProfile.get().getAddress(), new Tuple2<>(0.0, 1));
-                }else{
-                    Tuple2<Double, Integer> tuple2 = workerAssignedSlots.get(workerProfile.get().getAddress());
-                    workerAssignedSlots.put(workerProfile.get().getAddress(), new Tuple2<>(tuple2._1, tuple2._2+1));
+                if (workerAssignedSlots.get(workerProfile.get().getAddress()) == null) {
+                    workerAssignedSlots.put(
+                            workerProfile.get().getAddress(),
+                            new ImmutableTriple<>(
+                                    0.0, 1, workerProfile.get().getAssignedSlots().length));
+                } else {
+                    ImmutableTriple<Double, Integer, Integer> tuple2 =
+                            workerAssignedSlots.get(workerProfile.get().getAddress());
+                    workerAssignedSlots.put(
+                            workerProfile.get().getAddress(),
+                            new ImmutableTriple<>(tuple2.left, tuple2.middle + 1, tuple2.right));
                 }
-                System.out.println("Selected worker: "+workerProfile.get().getAddress());
-            LOGGER.fine("Selected worker: "+workerProfile.get().getAddress());
+                System.out.println("Selected worker: " + workerProfile.get().getAddress());
+                LOGGER.fine("Selected worker: " + workerProfile.get().getAddress());
                 break;
             case RANDOM:
                 // Randomly obtain a worker
@@ -281,16 +310,24 @@ public class ResourceRequestHandler {
                 workerProfile =
                         availableWorkers.stream()
                                 .min(Comparator.comparingDouble(this::calculateSlotUsage));
-                System.out.println("已分配："+workerProfile.get().getAddress()+" "+workerProfile.get().getAssignedSlots().length);
+                System.out.println(
+                        "已分配："
+                                + workerProfile.get().getAddress()
+                                + " "
+                                + workerProfile.get().getAssignedSlots().length);
 
-                Tuple2<Double, Integer> tuple2 = workerAssignedSlots.get(workerProfile.get().getAddress());
+                ImmutableTriple<Double, Integer, Integer> tuple2 =
+                        workerAssignedSlots.get(workerProfile.get().getAddress());
                 if (tuple2 != null) {
-                    workerAssignedSlots.put(workerProfile.get().getAddress(), new Tuple2<>(0.0,tuple2._2 + 1));
+                    workerAssignedSlots.put(
+                            workerProfile.get().getAddress(),
+                            new ImmutableTriple<>(0.0, tuple2.middle + 1, 0));
                 } else {
-                    workerAssignedSlots.put(workerProfile.get().getAddress(), new Tuple2<>(0.0, 1));
+                    workerAssignedSlots.put(
+                            workerProfile.get().getAddress(), new ImmutableTriple<>(0.0, 1, 0));
                 }
 
-                System.out.println("Selected worker11: "+workerProfile.get().getAddress());
+                System.out.println("Selected worker11: " + workerProfile.get().getAddress());
         }
 
         if (!workerProfile.isPresent()) {
@@ -313,15 +350,16 @@ public class ResourceRequestHandler {
      */
     private double calculateSlotUsage(WorkerProfile worker) {
         // 动态计算
-        Tuple2<Double, Integer> tuple2 = workerAssignedSlots.get(worker.getAddress());
+        ImmutableTriple<Double, Integer, Integer> tuple2 =
+                workerAssignedSlots.get(worker.getAddress());
         int assignedSlots;
         if (tuple2 != null) {
             // 如果我们手动记录了已分配的 slot 数量，那么我们就用该数量，因为 worker.getAssignedSlots 不是实时更新的。
-            assignedSlots = tuple2._2;
-        } else{
+            assignedSlots = tuple2.middle;
+        } else {
             assignedSlots = worker.getAssignedSlots().length;
         }
-        workerAssignedSlots.put(worker.getAddress(), new Tuple2<>(0.0,assignedSlots));
+        workerAssignedSlots.put(worker.getAddress(), new ImmutableTriple<>(0.0, assignedSlots, 0));
 
         int totalSlots = worker.getUnassignedSlots().length + worker.getAssignedSlots().length;
         int unassignedSlots = totalSlots - assignedSlots;
@@ -329,7 +367,15 @@ public class ResourceRequestHandler {
         if (totalSlots == 0) {
             return 1.0;
         }
-        System.out.println("::::"+worker.getAddress()+"::::"+ ((double) (totalSlots - unassignedSlots) / totalSlots) + "\t"+totalSlots + "\t"+unassignedSlots );
+        System.out.println(
+                "::::"
+                        + worker.getAddress()
+                        + "::::"
+                        + ((double) (totalSlots - unassignedSlots) / totalSlots)
+                        + "\t"
+                        + totalSlots
+                        + "\t"
+                        + unassignedSlots);
         return (double) (totalSlots - unassignedSlots) / totalSlots;
     }
 

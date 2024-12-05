@@ -17,7 +17,6 @@
 
 package org.apache.seatunnel.engine.server.resourcemanager;
 
-import lombok.Setter;
 import org.apache.seatunnel.engine.common.config.EngineConfig;
 import org.apache.seatunnel.engine.common.runtime.ExecutionMode;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.ReleaseSlotOperation;
@@ -30,12 +29,15 @@ import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.utils.NodeEngineUtil;
 
+import org.apache.commons.lang3.tuple.ImmutableTriple;
+
 import com.hazelcast.cluster.Address;
 import com.hazelcast.cluster.Member;
 import com.hazelcast.internal.services.MembershipServiceEvent;
 import com.hazelcast.spi.impl.NodeEngine;
 import com.hazelcast.spi.impl.operationservice.Operation;
 import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -74,8 +76,8 @@ public abstract class AbstractResourceManager implements ResourceManager {
 
     private Map<Address, SystemLoad> workerLoadMap;
 
-    @Setter @Getter private Map<Address, scala.Tuple2<Double, Integer>> workerAssignedSlots;
-
+    @Setter @Getter
+    private Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
 
     public AbstractResourceManager(NodeEngine nodeEngine, EngineConfig engineConfig) {
         this.registerWorker = new ConcurrentHashMap<>();
@@ -143,32 +145,41 @@ public abstract class AbstractResourceManager implements ResourceManager {
                                                                 systemLoad -> {
                                                                     if (Objects.nonNull(
                                                                             systemLoad)) {
-                                                                        SystemLoad
-                                                                                systemLoads =
-                                                                                        workerLoadMap
-                                                                                                .get(
-                                                                                                        node);
+                                                                        SystemLoad systemLoads =
+                                                                                workerLoadMap.get(
+                                                                                        node);
                                                                         if (systemLoads == null) {
-                                                                            systemLoads = new SystemLoad();
+                                                                            systemLoads =
+                                                                                    new SystemLoad();
                                                                             workerLoadMap.put(
                                                                                     node,
                                                                                     systemLoads);
                                                                         }
-                                                                        LinkedHashMap<String, SystemLoad.SystemLoadInfo> metrics = systemLoads.getMetrics();
-                                                                        if(metrics == null) {
-                                                                            metrics = new LinkedHashMap<>();
+                                                                        LinkedHashMap<
+                                                                                        String,
+                                                                                        SystemLoad
+                                                                                                .SystemLoadInfo>
+                                                                                metrics =
+                                                                                        systemLoads
+                                                                                                .getMetrics();
+                                                                        if (metrics == null) {
+                                                                            metrics =
+                                                                                    new LinkedHashMap<>();
                                                                         }
-                                                                        if (metrics.size()
-                                                                                >= 5) {
-                                                                            metrics.remove(metrics.keySet().iterator().next());
+                                                                        if (metrics.size() >= 5) {
+                                                                            metrics.remove(
+                                                                                    metrics.keySet()
+                                                                                            .iterator()
+                                                                                            .next());
                                                                         }
                                                                         metrics.putAll(
-                                                                                ((SystemLoad)systemLoad)
+                                                                                ((SystemLoad)
+                                                                                                systemLoad)
                                                                                         .getMetrics());
-                                                                        systemLoads.setMetrics(metrics);
+                                                                        systemLoads.setMetrics(
+                                                                                metrics);
                                                                         workerLoadMap.put(
-                                                                                node,
-                                                                                systemLoads);
+                                                                                node, systemLoads);
                                                                     }
                                                                     log.debug(
                                                                             "received system load from worker: "
@@ -328,7 +339,13 @@ public abstract class AbstractResourceManager implements ResourceManager {
         } else {
             log.debug("received worker heartbeat from: " + workerProfile.getAddress());
         }
-        System.out.println("发送心跳："+ workerProfile.getAddress()+","+workerProfile.getAssignedSlots().length+" "+workerProfile.getUnassignedSlots().length);
+        System.out.println(
+                "发送心跳："
+                        + workerProfile.getAddress()
+                        + ","
+                        + workerProfile.getAssignedSlots().length
+                        + " "
+                        + workerProfile.getUnassignedSlots().length);
         registerWorker.put(workerProfile.getAddress(), workerProfile);
     }
 

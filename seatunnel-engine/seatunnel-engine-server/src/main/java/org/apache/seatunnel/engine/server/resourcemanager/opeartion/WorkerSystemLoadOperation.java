@@ -50,10 +50,10 @@ public class WorkerSystemLoadOperation extends Operation implements IdentifiedDa
         String currentTime =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         SystemLoad.SystemLoadInfo systemLoadInfo = new SystemLoad.SystemLoadInfo();
-        systemLoadInfo.setCpuPercentage( getCpuPercentage());
-        systemLoadInfo.setMemPercentage( getMemPercentage());
-        System.out.println("1111:"+systemLoadInfo);
-        workerSystemLoad.setMetrics(new LinkedHashMap<>(Collections.singletonMap(currentTime,systemLoadInfo)));
+        systemLoadInfo.setCpuPercentage(getCpuPercentage());
+        systemLoadInfo.setMemPercentage(getMemPercentage());
+        workerSystemLoad.setMetrics(
+                new LinkedHashMap<>(Collections.singletonMap(currentTime, systemLoadInfo)));
     }
 
     public double getMemPercentage() {
