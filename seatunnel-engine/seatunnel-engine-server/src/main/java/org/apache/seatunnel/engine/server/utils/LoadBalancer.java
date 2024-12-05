@@ -115,8 +115,9 @@ public class LoadBalancer {
         // 第四步结果
         double resourceAvailabilityStep4 = this.calculateComprehensiveResourceAvailability(comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
         // 开始计算第五步，平衡因子
-        double slotWeight = this.balanceFactor(workerProfile);
+        double slotWeight = this.balanceFactor(workerProfile,workerAssignedSlots);
         double result = this.calculateResourceAvailability(resourceAvailabilityStep4, slotWeight);
+        System.out.println("node:"+workerProfile.getAddress()+"mem:"+systemLoads.getMetrics()+" 第三步："+comprehensiveResourceAvailability+" 第四步："+resourceAvailabilityStep4+" 第五步："+slotWeight+" 最终结果："+result);
         return result;
     }
 
@@ -157,16 +158,30 @@ public class LoadBalancer {
             tuple2 = workerAssignedSlots.get(workerProfile.getAddress());
             singleSlotUseResource = tuple2._1;
         }
-        // 当前任务在 Worker 节点已经申请的次数
-        workerAssignedSlots.put(workerProfile.getAddress(), new Tuple2<>(tuple2._1, tuple2._2+1));
+
         Integer assignedTimesForTask = tuple2._2;
+        System.out.println(assignedTimesForTask);
         // 计算当前任务在 Worker 节点的权重，第四步计算完成
         comprehensiveResourceAvailability = comprehensiveResourceAvailability - (assignedTimesForTask * singleSlotUseResource);
         return comprehensiveResourceAvailability;
     }
 
-    public double balanceFactor(WorkerProfile workerProfile){
-        return 1.0 - ((double)workerProfile.getAssignedSlots().length / (workerProfile.getAssignedSlots().length + workerProfile.getUnassignedSlots().length));
+    public double balanceFactor(WorkerProfile workerProfile, Map<Address, Tuple2<Double,Integer>> workerAssignedSlots){
+        Tuple2<Double, Integer> tuple2 = workerAssignedSlots.get(workerProfile.getAddress());
+        if(tuple2!=null) {
+            Integer assignedSlots = workerProfile.getAssignedSlots().length + tuple2._2;
+            while (assignedSlots > (workerProfile.getAssignedSlots().length + workerProfile.getUnassignedSlots().length)) {
+                assignedSlots--;
+            }
+            System.out.println("已分配：" + assignedSlots);
+            return balanceFactor(workerProfile, assignedSlots);
+        }else{
+            return balanceFactor(workerProfile, workerProfile.getAssignedSlots().length);
+        }
+    }
+
+    public double balanceFactor(WorkerProfile workerProfile, Integer assignedSlots){
+        return 1.0 - ((double)assignedSlots / (workerProfile.getAssignedSlots().length + workerProfile.getUnassignedSlots().length));
     }
 
     // 测试方法

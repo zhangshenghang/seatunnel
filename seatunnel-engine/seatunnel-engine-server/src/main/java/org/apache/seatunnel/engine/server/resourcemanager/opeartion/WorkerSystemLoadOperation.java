@@ -52,13 +52,14 @@ public class WorkerSystemLoadOperation extends Operation implements IdentifiedDa
         SystemLoad.SystemLoadInfo systemLoadInfo = new SystemLoad.SystemLoadInfo();
         systemLoadInfo.setCpuPercentage( getCpuPercentage());
         systemLoadInfo.setMemPercentage( getMemPercentage());
+        System.out.println("1111:"+systemLoadInfo);
         workerSystemLoad.setMetrics(new LinkedHashMap<>(Collections.singletonMap(currentTime,systemLoadInfo)));
     }
 
     public double getMemPercentage() {
         MemoryMXBean memoryMxBean = ManagementFactory.getMemoryMXBean();
         MemoryUsage heapMemoryUsage = memoryMxBean.getHeapMemoryUsage();
-        return (heapMemoryUsage.getUsed() / (double) heapMemoryUsage.getMax()) * 100.0;
+        return (heapMemoryUsage.getUsed() / (double) heapMemoryUsage.getMax());
     }
 
     @SneakyThrows
@@ -82,7 +83,7 @@ public class WorkerSystemLoadOperation extends Operation implements IdentifiedDa
                 ticks[CentralProcessor.TickType.IDLE.getIndex()]
                         - prevTicks[CentralProcessor.TickType.IDLE.getIndex()];
         long totalCpu = user + nice + sys + idle;
-        return ((totalCpu - idle) / (double) totalCpu) * 100.0;
+        return ((totalCpu - idle) / (double) totalCpu);
     }
 
     @Override

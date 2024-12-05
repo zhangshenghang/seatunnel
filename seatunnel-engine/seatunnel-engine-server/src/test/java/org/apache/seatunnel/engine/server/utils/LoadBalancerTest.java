@@ -197,7 +197,7 @@ public class LoadBalancerTest {
         WorkerProfile workerProfile = Mockito.mock(WorkerProfile.class);
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[3]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[7]);
-        double balanceFactor = loadBalancer.balanceFactor(workerProfile);
+        double balanceFactor = loadBalancer.balanceFactor(workerProfile,3);
         Assertions.assertEquals(0.7, balanceFactor, 0.01);
     }
 
@@ -237,6 +237,7 @@ public class LoadBalancerTest {
 
         // worker 已经分配过1个 Slot
         times = 1;
+        workerAssignedSlots.put(address, new Tuple2<>(singleSlotResource, 1));
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[6]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[2]);
         result = loadBalancer.calculateComprehensiveResourceAvailability(comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
@@ -246,10 +247,11 @@ public class LoadBalancerTest {
         Assertions.assertEquals(0.4, result, 0.01);
 
 
+        workerAssignedSlots.put(address, new Tuple2<>(singleSlotResource, 2));
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[7]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[1]);
         result = loadBalancer.calculateComprehensiveResourceAvailability(comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
-        double balanceFactor = loadBalancer.balanceFactor(workerProfile);
+        double balanceFactor = loadBalancer.balanceFactor(workerProfile,7);
         Assertions.assertEquals(0.12, balanceFactor, 0.01);
 
         double finalResult = 0.7 * 0.3 + 0.125 * 0.3;
@@ -286,10 +288,12 @@ public class LoadBalancerTest {
         ResourceRequestHandler resourceRequestHandler = new ResourceRequestHandler(1L, resourceProfiles, null, rm, workerLoadMap);
         resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2);
         // 模拟申请资源
+        workerAssignedSlots2.put(address, new Tuple2<>(singleSlotResource, 1));
         when(workerProfile2.getAssignedSlots()).thenReturn(new SlotProfile[6]);
         when(workerProfile2.getUnassignedSlots()).thenReturn(new SlotProfile[2]);
         resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2);
 
+        workerAssignedSlots2.put(address, new Tuple2<>(singleSlotResource, 2));
         when(workerProfile2.getAssignedSlots()).thenReturn(new SlotProfile[7]);
         when(workerProfile2.getUnassignedSlots()).thenReturn(new SlotProfile[1]);
         Assertions.assertEquals(resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2),finalResult);

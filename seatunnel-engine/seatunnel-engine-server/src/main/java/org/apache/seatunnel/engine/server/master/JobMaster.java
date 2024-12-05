@@ -66,6 +66,7 @@ import org.apache.seatunnel.engine.server.execution.TaskGroupLocation;
 import org.apache.seatunnel.engine.server.execution.TaskLocation;
 import org.apache.seatunnel.engine.server.metrics.JobMetricsUtil;
 import org.apache.seatunnel.engine.server.metrics.SeaTunnelMetricsContext;
+import org.apache.seatunnel.engine.server.resourcemanager.AbstractResourceManager;
 import org.apache.seatunnel.engine.server.resourcemanager.ResourceManager;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
 import org.apache.seatunnel.engine.server.task.operation.CleanTaskGroupContextOperation;
@@ -372,6 +373,12 @@ public class JobMaster {
      */
     public boolean preApplyResources(SubPlan subPlan) {
 
+        // 开始申请任务资源时，重置worker的slot分配信息
+        // 主要用于两个场景：
+        // 1. 基于 SYSTEM_LOAD 策略时，系统负载无法动态变化，需要计算推理每个 Slot 使用的资源
+        // 2. 基于 SLOT_RATIO 策略时，registerWorker 也不是实时更新的，用于记录的 Slot 申请状态
+        ((AbstractResourceManager)resourceManager).setWorkerAssignedSlots(new ConcurrentHashMap<>());
+
         Map<TaskGroupLocation, CompletableFuture<SlotProfile>> preApplyResourceFutures =
                 new HashMap<>();
 
@@ -469,6 +476,7 @@ public class JobMaster {
     private void preApplyResourcesForSubPlan(
             SubPlan subPlan,
             Map<TaskGroupLocation, CompletableFuture<SlotProfile>> preApplyResourceFutures) {
+
         Map<TaskGroupLocation, CompletableFuture<SlotProfile>> coordinatorFutures = new HashMap<>();
         subPlan.getCoordinatorVertexList()
                 .forEach(
@@ -489,6 +497,7 @@ public class JobMaster {
 
         preApplyResourceFutures.putAll(coordinatorFutures);
         preApplyResourceFutures.putAll(taskFutures);
+        LOGGER.fine("preApplyResourceFutures size: " + preApplyResourceFutures.size());
     }
 
     public void run() {

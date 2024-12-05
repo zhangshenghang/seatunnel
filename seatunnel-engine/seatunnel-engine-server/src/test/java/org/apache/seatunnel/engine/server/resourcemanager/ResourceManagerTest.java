@@ -204,7 +204,7 @@ public class ResourceManagerTest extends AbstractSeaTunnelServerTest<ResourceMan
                                 registerWorker,
                                 (AbstractResourceManager) this.resourceManager,
                                 null)
-                        .preCheckWorkerResource(new ResourceProfile(),new ConcurrentHashMap<>());
+                        .preCheckWorkerResource(new ResourceProfile());
         Assertions.assertEquals(result.isPresent(), dynamicSlot);
     }
 }
