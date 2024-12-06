@@ -59,7 +59,6 @@ public class SystemLoadCalculateTest {
     @Test
     @DisplayName("Step0: A newly created LoadBalancer should return the highest priority of 1.0")
     void newLoadBalancerShouldReturnMaxPriority() {
-        System.out.println(systemLoadCalculate.calculateSchedulingPriority());
         Assertions.assertEquals(1.0, systemLoadCalculate.calculateSchedulingPriority());
     }
 

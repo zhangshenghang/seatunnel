@@ -120,7 +120,7 @@ public class ServerConfigOptions {
                     .enumType(AllocateStrategy.class)
                     .defaultValue(AllocateStrategy.SLOT_RATIO)
                     .withDescription(
-                            "When the strategy is SLOT_RATIO, the system allocates tasks based on the slot usage ratio, with priority given to workers with low usage rates; When the strategy is SYS_LOAD, the system allocates tasks based on server load, with priority given to workers with lower load.");
+                            "When the strategy is SLOT_RATIO, the system allocates tasks based on the slot usage ratio, with priority given to workers with low usage rates; When the strategy is SYSTEM_LOAD, the system allocates tasks based on server load, with priority given to workers with lower load.");
 
     public static final Option<SlotServiceConfig> SLOT_SERVICE =
             Options.key("slot-service")

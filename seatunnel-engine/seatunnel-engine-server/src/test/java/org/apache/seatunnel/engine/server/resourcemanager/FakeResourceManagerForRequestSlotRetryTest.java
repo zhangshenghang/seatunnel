@@ -33,6 +33,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Used to test ResourceManager, override init method to register more workers. */
@@ -49,6 +50,7 @@ public class FakeResourceManagerForRequestSlotRetryTest extends AbstractResource
         super(nodeEngine, new EngineConfig());
         this.newWorkerCount = newWorkerCount;
         this.noSlotWorkerCount = noSlotWorkerCount;
+        this.setWorkerAssignedSlots(new ConcurrentHashMap<>());
         init();
     }
 

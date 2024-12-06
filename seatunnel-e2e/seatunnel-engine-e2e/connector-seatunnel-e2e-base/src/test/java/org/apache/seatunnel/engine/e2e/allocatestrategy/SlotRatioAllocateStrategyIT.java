@@ -122,7 +122,7 @@ public class SlotRatioAllocateStrategyIT {
                                     JobMode.STREAMING,
                                     testRowNumber,
                                     4,
-                                    "allocate_strategy_with_slot_ratio.conf"),
+                                    "allocate-strategy/allocate_strategy_with_slot_ratio.conf"),
                             jobConfig,
                             seaTunnelConfig)
                     .execute();
@@ -164,7 +164,7 @@ public class SlotRatioAllocateStrategyIT {
                                     JobMode.STREAMING,
                                     testRowNumber,
                                     6,
-                                    "allocate_strategy_with_slot_ratio.conf"),
+                                    "allocate-strategy/allocate_strategy_with_slot_ratio.conf"),
                             jobConfig,
                             seaTunnelConfig)
                     .execute();

@@ -128,7 +128,7 @@ public class SystemLoadAllocateStrategyIT {
                                     JobMode.STREAMING,
                                     testRowNumber,
                                     testParallelism,
-                                    "allocate_strategy_with_system_load.conf"),
+                                    "allocate-strategy/allocate_strategy_tag1_with_system_load.conf"),
                             jobConfig,
                             seaTunnelConfig)
                     .execute();
@@ -140,7 +140,7 @@ public class SystemLoadAllocateStrategyIT {
                                     JobMode.STREAMING,
                                     testRowNumber,
                                     testParallelism,
-                                    "allocate_strategy_tag2_with_system_load.conf"),
+                                    "allocate-strategy/allocate_strategy_tag2_with_system_load.conf"),
                             jobConfig,
                             seaTunnelConfig)
                     .execute();
@@ -182,7 +182,7 @@ public class SystemLoadAllocateStrategyIT {
                                     JobMode.STREAMING,
                                     testRowNumber,
                                     3,
-                                    "allocate_strategy_no_tag_with_system_load.conf"),
+                                    "allocate-strategy/allocate_strategy_no_tag_with_system_load.conf"),
                             jobConfig,
                             seaTunnelConfig)
                     .execute();

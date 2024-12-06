@@ -21,7 +21,6 @@ import lombok.Data;
 
 import java.io.Serializable;
 
-import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 import static com.hazelcast.internal.util.Preconditions.checkPositive;
 
 @Data
@@ -37,11 +36,5 @@ public class SlotServiceConfig implements Serializable {
     public void setSlotNum(int slotNum) {
         checkPositive(slotNum, ServerConfigOptions.SLOT_NUM + " must be > 0");
         this.slotNum = slotNum;
-    }
-
-    public SlotServiceConfig setAllocateStrategy(AllocateStrategy allocateStrategy) {
-        checkNotNull(allocateStrategy);
-        this.allocateStrategy = allocateStrategy;
-        return this;
     }
 }

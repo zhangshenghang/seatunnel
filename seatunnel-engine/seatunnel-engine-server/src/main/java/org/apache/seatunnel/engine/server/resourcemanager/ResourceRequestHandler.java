@@ -258,40 +258,25 @@ public class ResourceRequestHandler {
                 workerProfile =
                         availableWorkers.stream()
                                 .max(
-                                        (w1, w2) -> {
-                                            double weight1 =
-                                                    calculateWeight(w1, workerAssignedSlots);
-                                            double weight2 =
-                                                    calculateWeight(w2, workerAssignedSlots);
-                                            LOGGER.fine(
-                                                    "Comparing weights: "
-                                                            + w1.getAddress()
-                                                            + "="
-                                                            + weight1
-                                                            + ", "
-                                                            + w2.getAddress()
-                                                            + "="
-                                                            + weight2);
-                                            return Double.compare(weight1, weight2);
-                                        });
-                // The number of times the current task has been applied on the Worker node
-                if (workerAssignedSlots.get(workerProfile.get().getAddress()) == null) {
-                    workerAssignedSlots.put(
-                            workerProfile.get().getAddress(),
-                            new ImmutableTriple<>(
-                                    0.0, 1, workerProfile.get().getAssignedSlots().length));
-                } else {
-                    ImmutableTriple<Double, Integer, Integer> tuple2 =
-                            workerAssignedSlots.get(workerProfile.get().getAddress());
-                    workerAssignedSlots.put(
-                            workerProfile.get().getAddress(),
-                            new ImmutableTriple<>(tuple2.left, tuple2.middle + 1, tuple2.right));
-                }
-                LOGGER.fine("Selected worker: " + workerProfile.get().getAddress());
+                                        Comparator.comparingDouble(
+                                                w -> calculateWeight(w, workerAssignedSlots)));
+                workerProfile.ifPresent(
+                        profile -> {
+                            workerAssignedSlots.merge(
+                                    profile.getAddress(),
+                                    new ImmutableTriple<>(
+                                            0.0, 1, profile.getAssignedSlots().length),
+                                    (oldVal, newVal) ->
+                                            new ImmutableTriple<>(
+                                                    oldVal.left, oldVal.middle + 1, oldVal.right));
+
+                            LOGGER.fine("Selected worker: " + profile.getAddress());
+                        });
                 break;
             case RANDOM:
                 // Randomly obtain a worker
                 Collections.shuffle(availableWorkers);
+                Collections.shuffle(workerProfiles);
                 workerProfile = availableWorkers.stream().findFirst();
                 break;
             default:
@@ -300,20 +285,17 @@ public class ResourceRequestHandler {
                 workerProfile =
                         availableWorkers.stream()
                                 .min(Comparator.comparingDouble(this::calculateSlotUsage));
-
-                ImmutableTriple<Double, Integer, Integer> tuple2 =
-                        workerAssignedSlots.get(workerProfile.get().getAddress());
-                if (tuple2 != null) {
-                    workerAssignedSlots.put(
-                            workerProfile.get().getAddress(),
-                            new ImmutableTriple<>(0.0, tuple2.middle + 1, 0));
-                } else {
-                    workerAssignedSlots.put(
-                            workerProfile.get().getAddress(), new ImmutableTriple<>(0.0, 1, 0));
-                }
-                LOGGER.fine(
-                        "Selected worker: "
-                                + workerProfile.map(WorkerProfile::getAddress).orElse(null));
+                workerProfile.ifPresent(
+                        profile -> {
+                            workerAssignedSlots.merge(
+                                    profile.getAddress(),
+                                    new ImmutableTriple<>(
+                                            0.0, 1, profile.getAssignedSlots().length),
+                                    (oldVal, newVal) ->
+                                            new ImmutableTriple<>(
+                                                    0.0, oldVal.middle + 1, oldVal.right));
+                            LOGGER.fine("Selected worker: " + profile.getAddress());
+                        });
         }
 
         if (!workerProfile.isPresent()) {
@@ -335,34 +317,22 @@ public class ResourceRequestHandler {
      * @return slot usage rate, range 0.0-1.0
      */
     private double calculateSlotUsage(WorkerProfile worker) {
-        // 动态计算
-        ImmutableTriple<Double, Integer, Integer> tuple2 =
+        ImmutableTriple<Double, Integer, Integer> immutableTriple =
                 workerAssignedSlots.get(worker.getAddress());
-        int assignedSlots;
-        if (tuple2 != null) {
-            // 如果我们手动记录了已分配的 slot 数量，那么我们就用该数量，因为 worker.getAssignedSlots 不是实时更新的。
-            assignedSlots = tuple2.middle;
-        } else {
-            assignedSlots = worker.getAssignedSlots().length;
-        }
+        // If we manually record the number of assigned slots, we use that number, since
+        // worker.getAssignedSlots is not updated in real time.
+        int assignedSlots =
+                (immutableTriple != null)
+                        ? immutableTriple.middle
+                        : worker.getAssignedSlots().length;
         workerAssignedSlots.put(worker.getAddress(), new ImmutableTriple<>(0.0, assignedSlots, 0));
 
         int totalSlots = worker.getUnassignedSlots().length + worker.getAssignedSlots().length;
-        int unassignedSlots = totalSlots - assignedSlots;
-
         if (totalSlots == 0) {
             return 1.0;
         }
-        System.out.println(
-                "::::"
-                        + worker.getAddress()
-                        + "::::"
-                        + ((double) (totalSlots - unassignedSlots) / totalSlots)
-                        + "\t"
-                        + totalSlots
-                        + "\t"
-                        + unassignedSlots);
-        return (double) (totalSlots - unassignedSlots) / totalSlots;
+
+        return (double) assignedSlots / totalSlots;
     }
 
     /**

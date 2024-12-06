@@ -373,10 +373,12 @@ public class JobMaster {
      */
     public boolean preApplyResources(SubPlan subPlan) {
 
-        // 开始申请任务资源时，重置worker的slot分配信息
-        // 主要用于两个场景：
-        // 1. 基于 SYSTEM_LOAD 策略时，系统负载无法动态变化，需要计算推理每个 Slot 使用的资源
-        // 2. 基于 SLOT_RATIO 策略时，registerWorker 也不是实时更新的，用于记录的 Slot 申请状态
+        // When starting to apply for task resources, reset the worker's slot allocation information
+        // Mainly used in two scenarios:
+        // 1. When based on the SYSTEM_LOAD strategy, the system load cannot change dynamically, and
+        // the resources used by each slot need to be calculated and inferred
+        // 2. When based on the SLOT_RATIO strategy, registerWorker is not updated in real time, and
+        // is used to record the slot application status
         ((AbstractResourceManager) resourceManager)
                 .setWorkerAssignedSlots(new ConcurrentHashMap<>());
 

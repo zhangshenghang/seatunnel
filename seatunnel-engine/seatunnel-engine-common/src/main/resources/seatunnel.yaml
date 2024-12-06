@@ -22,9 +22,7 @@ seatunnel:
         print-execution-info-interval: 60
         print-job-metrics-info-interval: 60
         slot-service:
-            dynamic-slot: false
-            slot-num: 10
-            slot-allocate-strategy: SYSTEM_LOAD
+            dynamic-slot: true
         checkpoint:
             interval: 300000
             timeout: 10000

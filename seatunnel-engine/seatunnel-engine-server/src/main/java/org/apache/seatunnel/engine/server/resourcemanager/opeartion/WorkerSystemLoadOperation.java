@@ -64,12 +64,20 @@ public class WorkerSystemLoadOperation extends Operation implements IdentifiedDa
 
     @SneakyThrows
     public double getCpuPercentage() {
+        // Create a SystemInfo object to access hardware information
         SystemInfo si = new SystemInfo();
+        // Get the hardware abstraction layer
         HardwareAbstractionLayer hal = si.getHardware();
+        // Get the central processor
         CentralProcessor processor = hal.getProcessor();
+        // Get the previous CPU load ticks
         long[] prevTicks = processor.getSystemCpuLoadTicks();
+        // Sleep for 1 second to measure the CPU load over time
         Thread.sleep(1000);
+        // Get the current CPU load ticks
         long[] ticks = processor.getSystemCpuLoadTicks();
+
+        // Calculate the difference in CPU ticks for each type
         long user =
                 ticks[CentralProcessor.TickType.USER.getIndex()]
                         - prevTicks[CentralProcessor.TickType.USER.getIndex()];
@@ -82,7 +90,10 @@ public class WorkerSystemLoadOperation extends Operation implements IdentifiedDa
         long idle =
                 ticks[CentralProcessor.TickType.IDLE.getIndex()]
                         - prevTicks[CentralProcessor.TickType.IDLE.getIndex()];
+        // Calculate the total CPU ticks
         long totalCpu = user + nice + sys + idle;
+
+        // Calculate and return the CPU usage percentage
         return ((double) (totalCpu - idle) / (double) totalCpu);
     }
 
