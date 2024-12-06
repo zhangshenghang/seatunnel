@@ -114,6 +114,8 @@ public class SystemLoadAllocateStrategyIT {
                                     Assertions.assertEquals(
                                             2, finalNode.getCluster().getMembers().size()));
 
+            // Waiting for worker heartbeat registration
+            Thread.sleep(10000);
             Common.setDeployMode(DeployMode.CLIENT);
             JobConfig jobConfig = new JobConfig();
             jobConfig.setName(testCaseName);
