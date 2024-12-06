@@ -59,7 +59,7 @@ public class WorkerSystemLoadOperation extends Operation implements IdentifiedDa
     public double getMemPercentage() {
         MemoryMXBean memoryMxBean = ManagementFactory.getMemoryMXBean();
         MemoryUsage heapMemoryUsage = memoryMxBean.getHeapMemoryUsage();
-        return (heapMemoryUsage.getUsed() / (double) heapMemoryUsage.getMax());
+        return ((double) heapMemoryUsage.getUsed() / (double) heapMemoryUsage.getMax());
     }
 
     @SneakyThrows
@@ -83,7 +83,7 @@ public class WorkerSystemLoadOperation extends Operation implements IdentifiedDa
                 ticks[CentralProcessor.TickType.IDLE.getIndex()]
                         - prevTicks[CentralProcessor.TickType.IDLE.getIndex()];
         long totalCpu = user + nice + sys + idle;
-        return ((totalCpu - idle) / (double) totalCpu);
+        return ((double) (totalCpu - idle) / (double) totalCpu);
     }
 
     @Override

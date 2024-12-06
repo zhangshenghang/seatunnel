@@ -27,7 +27,7 @@ import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.service.slot.SlotAndWorkerProfile;
-import org.apache.seatunnel.engine.server.utils.LoadBalancer;
+import org.apache.seatunnel.engine.server.utils.SystemLoadCalculate;
 
 import org.apache.commons.lang3.tuple.ImmutableTriple;
 
@@ -72,9 +72,11 @@ public class ResourceRequestHandler {
 
     private final AllocateStrategy allocateStrategy;
 
+    // The load of each worker node
     private final Map<Address, SystemLoad> workerLoadMap;
-    // Tuple2 <单个节点推算的使用资源比例，申请 slot 次数，资源申请前记录的次数>
-    //    private final Map<Address, Tuple2<Double,Integer>> workerAssignedSlots;
+
+    // ImmutableTriple <the estimated resource usage ratio of a single node, the number of slot
+    // applications, and the number of records before resource application>
     private final Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
 
     public ResourceRequestHandler(
@@ -123,7 +125,6 @@ public class ResourceRequestHandler {
                                     } else {
                                         List<ResourceProfile> needRequestResource =
                                                 stillNeedRequestResource();
-                                        System.out.println("异常了+=" + needRequestResource.isEmpty());
                                         if (!needRequestResource.isEmpty()) {
                                             Exception requestSlotWithRetryError = null;
                                             try {
@@ -230,8 +231,8 @@ public class ResourceRequestHandler {
     public Double calculateWeight(
             WorkerProfile workerProfile,
             Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
-        LoadBalancer loadBalancer = new LoadBalancer();
-        return loadBalancer.calculate(
+        SystemLoadCalculate systemLoadCalculate = new SystemLoadCalculate();
+        return systemLoadCalculate.calculate(
                 workerLoadMap.get(workerProfile.getAddress()), workerProfile, workerAssignedSlots);
     }
 
@@ -262,15 +263,6 @@ public class ResourceRequestHandler {
                                                     calculateWeight(w1, workerAssignedSlots);
                                             double weight2 =
                                                     calculateWeight(w2, workerAssignedSlots);
-                                            System.out.println(
-                                                    "Comparing weights: "
-                                                            + w1.getAddress()
-                                                            + "="
-                                                            + weight1
-                                                            + ", "
-                                                            + w2.getAddress()
-                                                            + "="
-                                                            + weight2);
                                             LOGGER.fine(
                                                     "Comparing weights: "
                                                             + w1.getAddress()
@@ -282,7 +274,7 @@ public class ResourceRequestHandler {
                                                             + weight2);
                                             return Double.compare(weight1, weight2);
                                         });
-                // 当前任务在 Worker 节点已经申请的次数
+                // The number of times the current task has been applied on the Worker node
                 if (workerAssignedSlots.get(workerProfile.get().getAddress()) == null) {
                     workerAssignedSlots.put(
                             workerProfile.get().getAddress(),
@@ -295,7 +287,6 @@ public class ResourceRequestHandler {
                             workerProfile.get().getAddress(),
                             new ImmutableTriple<>(tuple2.left, tuple2.middle + 1, tuple2.right));
                 }
-                System.out.println("Selected worker: " + workerProfile.get().getAddress());
                 LOGGER.fine("Selected worker: " + workerProfile.get().getAddress());
                 break;
             case RANDOM:
@@ -305,16 +296,10 @@ public class ResourceRequestHandler {
                 break;
             default:
                 // The slot usage rate strategy is used by default. The lower the slot usage rate,
-                // the
-                // higher the priority.
+                // the higher the priority.
                 workerProfile =
                         availableWorkers.stream()
                                 .min(Comparator.comparingDouble(this::calculateSlotUsage));
-                System.out.println(
-                        "已分配："
-                                + workerProfile.get().getAddress()
-                                + " "
-                                + workerProfile.get().getAssignedSlots().length);
 
                 ImmutableTriple<Double, Integer, Integer> tuple2 =
                         workerAssignedSlots.get(workerProfile.get().getAddress());
@@ -326,8 +311,9 @@ public class ResourceRequestHandler {
                     workerAssignedSlots.put(
                             workerProfile.get().getAddress(), new ImmutableTriple<>(0.0, 1, 0));
                 }
-
-                System.out.println("Selected worker11: " + workerProfile.get().getAddress());
+                LOGGER.fine(
+                        "Selected worker: "
+                                + workerProfile.map(WorkerProfile::getAddress).orElse(null));
         }
 
         if (!workerProfile.isPresent()) {

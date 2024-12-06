@@ -15,19 +15,18 @@
  * limitations under the License.
  */
 
-package org.apache.seatunnel.engine.e2e;
+package org.apache.seatunnel.engine.e2e.allocatestrategy;
 
 import org.apache.seatunnel.common.config.Common;
 import org.apache.seatunnel.common.config.DeployMode;
 import org.apache.seatunnel.common.constants.JobMode;
 import org.apache.seatunnel.engine.client.SeaTunnelClient;
-import org.apache.seatunnel.engine.client.job.ClientJobExecutionEnvironment;
-import org.apache.seatunnel.engine.client.job.ClientJobProxy;
 import org.apache.seatunnel.engine.common.config.ConfigProvider;
 import org.apache.seatunnel.engine.common.config.JobConfig;
 import org.apache.seatunnel.engine.common.config.SeaTunnelConfig;
 import org.apache.seatunnel.engine.common.config.server.AllocateStrategy;
 import org.apache.seatunnel.engine.common.config.server.SlotServiceConfig;
+import org.apache.seatunnel.engine.e2e.TestUtils;
 import org.apache.seatunnel.engine.server.SeaTunnelServer;
 import org.apache.seatunnel.engine.server.SeaTunnelServerStarter;
 import org.apache.seatunnel.engine.server.resourcemanager.ResourceManager;
@@ -39,7 +38,6 @@ import org.junit.jupiter.api.Test;
 
 import com.hazelcast.client.config.ClientConfig;
 import com.hazelcast.cluster.Address;
-import com.hazelcast.config.MemberAttributeConfig;
 import com.hazelcast.instance.impl.HazelcastInstanceImpl;
 import com.hazelcast.spi.impl.NodeEngineImpl;
 import lombok.NonNull;
@@ -56,7 +54,7 @@ import static org.apache.seatunnel.shade.com.google.common.base.Preconditions.ch
 
 /** Test task allocation strategy */
 @Slf4j
-public class AllocateStrategyIT {
+public class SlotRatioAllocateStrategyIT {
 
     public static final String DYNAMIC_TEST_CASE_NAME = "dynamic_test_case_name";
 
@@ -117,8 +115,8 @@ public class AllocateStrategyIT {
             clientConfig.setClusterName(TestUtils.getClusterName(testClusterName));
             engineClient = new SeaTunnelClient(clientConfig);
             // Start a task
-            ClientJobExecutionEnvironment jobExecutionEnv =
-                    engineClient.createExecutionContext(
+            engineClient
+                    .createExecutionContext(
                             createTestResources(
                                     testCaseName,
                                     JobMode.STREAMING,
@@ -126,8 +124,8 @@ public class AllocateStrategyIT {
                                     4,
                                     "allocate_strategy_with_slot_ratio.conf"),
                             jobConfig,
-                            seaTunnelConfig);
-            jobExecutionEnv.execute();
+                            seaTunnelConfig)
+                    .execute();
 
             NodeEngineImpl nodeEngine = node1.node.nodeEngine;
             Address node2Address = node2.node.address;
@@ -159,13 +157,8 @@ public class AllocateStrategyIT {
 
             // Start a task with 6 parallelism, which will occupy 7 slots in total, and the
             // SLOT_RATION strategy will be evenly distributed to two nodes
-            jobConfig = new JobConfig();
-            jobConfig.setName(testCaseName);
-            clientConfig = ConfigProvider.locateAndGetClientConfig();
-            clientConfig.setClusterName(TestUtils.getClusterName(testClusterName));
-            SeaTunnelClient engineClient2 = new SeaTunnelClient(clientConfig);
-            ClientJobExecutionEnvironment jobExecutionEnv2 =
-                    engineClient2.createExecutionContext(
+            engineClient
+                    .createExecutionContext(
                             createTestResources(
                                     testCaseName,
                                     JobMode.STREAMING,
@@ -173,8 +166,8 @@ public class AllocateStrategyIT {
                                     6,
                                     "allocate_strategy_with_slot_ratio.conf"),
                             jobConfig,
-                            seaTunnelConfig);
-            jobExecutionEnv2.execute();
+                            seaTunnelConfig)
+                    .execute();
 
             // The task will eventually occupy 7 slots. Together with the first task, it will occupy
             // a total of 12 slots. The SLOT_RATION strategy will evenly distribute them to the two
@@ -192,160 +185,6 @@ public class AllocateStrategyIT {
                                 Assertions.assertEquals(6, node1AssignedSlotsNum);
                                 Assertions.assertEquals(6, node2AssignedSlotsNum);
                             });
-
-        } finally {
-            if (engineClient != null) {
-                engineClient.close();
-            }
-            if (node1 != null) {
-                node1.shutdown();
-            }
-            if (node2 != null) {
-                node2.shutdown();
-            }
-        }
-    }
-
-    @Test
-    public void testSystemLoadStrategy() throws Exception {
-        String testCaseName = "testSystemLoadStrategy";
-        String testClusterName = "TestSystemLoadStrategy";
-        long testRowNumber = 100;
-        int testParallelism = 4;
-
-        HazelcastInstanceImpl node1 = null;
-        HazelcastInstanceImpl node2 = null;
-        SeaTunnelClient engineClient = null;
-
-        SeaTunnelConfig seaTunnelConfig = ConfigProvider.locateAndGetSeaTunnelConfig();
-        seaTunnelConfig
-                .getHazelcastConfig()
-                .setClusterName(TestUtils.getClusterName(testClusterName));
-        SlotServiceConfig slotServiceConfig =
-                seaTunnelConfig.getEngineConfig().getSlotServiceConfig();
-        slotServiceConfig.setSlotNum(10);
-        slotServiceConfig.setDynamicSlot(false);
-        // enable system load strategy
-        slotServiceConfig.setAllocateStrategy(AllocateStrategy.SYSTEM_LOAD);
-
-        // Set the node tag and submit a task that occupies 5 slots to each of the two nodes
-        MemberAttributeConfig node1Tags = new MemberAttributeConfig();
-        node1Tags.setAttribute("strategy", "system_load1");
-        seaTunnelConfig.getHazelcastConfig().setMemberAttributeConfig(node1Tags);
-
-        try {
-            node1 = SeaTunnelServerStarter.createHazelcastInstance(seaTunnelConfig);
-            MemberAttributeConfig node2Tags = new MemberAttributeConfig();
-            node2Tags.setAttribute("strategy", "system_load2");
-            seaTunnelConfig.getHazelcastConfig().setMemberAttributeConfig(node2Tags);
-            node2 = SeaTunnelServerStarter.createHazelcastInstance(seaTunnelConfig);
-
-            // waiting all node added to cluster
-            HazelcastInstanceImpl finalNode = node1;
-            Awaitility.await()
-                    .atMost(10, TimeUnit.SECONDS)
-                    .untilAsserted(
-                            () ->
-                                    Assertions.assertEquals(
-                                            2, finalNode.getCluster().getMembers().size()));
-
-            Common.setDeployMode(DeployMode.CLIENT);
-            JobConfig jobConfig = new JobConfig();
-            jobConfig.setName(testCaseName);
-
-            ClientConfig clientConfig = ConfigProvider.locateAndGetClientConfig();
-            clientConfig.setClusterName(TestUtils.getClusterName(testClusterName));
-            engineClient = new SeaTunnelClient(clientConfig);
-            ClientJobExecutionEnvironment jobExecutionEnv =
-                    engineClient.createExecutionContext(
-                            createTestResources(
-                                    testCaseName,
-                                    JobMode.STREAMING,
-                                    testRowNumber,
-                                    testParallelism,
-                                    "allocate_strategy_with_system_load.conf"),
-                            jobConfig,
-                            seaTunnelConfig);
-            ClientJobProxy clientJobProxy1 = jobExecutionEnv.execute();
-
-            engineClient
-                    .createExecutionContext(
-                            createTestResources(
-                                    testCaseName,
-                                    JobMode.STREAMING,
-                                    testRowNumber,
-                                    testParallelism,
-                                    "allocate_strategy_tag2_with_system_load.conf"),
-                            jobConfig,
-                            seaTunnelConfig)
-                    .execute();
-
-            NodeEngineImpl nodeEngine = node1.node.nodeEngine;
-            Address node2Address = node2.node.address;
-            Address node1Address = node1.node.address;
-
-            SeaTunnelServer server = nodeEngine.getService(SeaTunnelServer.SERVICE_NAME);
-            ResourceManager resourceManager = server.getCoordinatorService().getResourceManager();
-
-            Awaitility.await()
-                    .atMost(600, TimeUnit.SECONDS)
-                    .untilAsserted(
-                            () -> {
-                                ConcurrentMap<Address, WorkerProfile> registerWorker =
-                                        resourceManager.getRegisterWorker();
-                                int node1AssignedSlotsNum =
-                                        registerWorker.get(node1Address).getAssignedSlots().length;
-                                int node2AssignedSlotsNum =
-                                        registerWorker.get(node2Address).getAssignedSlots().length;
-                                Assertions.assertTrue(node1AssignedSlotsNum == 5);
-                                Assertions.assertTrue(node2AssignedSlotsNum == 5);
-                                Assertions.assertEquals(
-                                        10, node1AssignedSlotsNum + node2AssignedSlotsNum);
-                            });
-
-            // Waiting to collect the node's System Load information
-            Thread.sleep(60000);
-
-            // Start a task that occupies 4 slots
-            jobConfig = new JobConfig();
-            jobConfig.setName(testCaseName);
-
-            clientConfig = ConfigProvider.locateAndGetClientConfig();
-            clientConfig.setClusterName(TestUtils.getClusterName(testClusterName));
-            SeaTunnelClient engineClient2 = new SeaTunnelClient(clientConfig);
-            ClientJobExecutionEnvironment jobExecutionEnv2 =
-                    engineClient2.createExecutionContext(
-                            createTestResources(
-                                    testCaseName,
-                                    JobMode.STREAMING,
-                                    testRowNumber,
-                                    3,
-                                    "allocate_strategy_no_tag_with_system_load.conf"),
-                            jobConfig,
-                            seaTunnelConfig);
-            ClientJobProxy clientJobProxy2 = jobExecutionEnv2.execute();
-
-            // Because e2e runs on the same node, the CPU and memory are almost the same, but we
-            // introduced a balance factor (step 5). So the final result should also be balanced.
-            // That is, the two nodes occupy 7 slots respectively.
-            Awaitility.await()
-                    .atMost(600, TimeUnit.SECONDS)
-                    .untilAsserted(
-                            () -> {
-                                ConcurrentMap<Address, WorkerProfile> registerWorker =
-                                        resourceManager.getRegisterWorker();
-                                int node1AssignedSlotsNum =
-                                        registerWorker.get(node1Address).getAssignedSlots().length;
-                                int node2AssignedSlotsNum =
-                                        registerWorker.get(node2Address).getAssignedSlots().length;
-                                Assertions.assertEquals(7, node1AssignedSlotsNum);
-                                Assertions.assertEquals(7, node2AssignedSlotsNum);
-                            });
-
-            clientJobProxy1.cancelJob();
-            clientJobProxy2.cancelJob();
-            clientJobProxy1.waitForJobCompleteV2();
-            clientJobProxy2.waitForJobCompleteV2();
 
         } finally {
             if (engineClient != null) {

@@ -1,3 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.apache.seatunnel.engine.server.utils;
 
 import org.apache.seatunnel.engine.common.config.EngineConfig;
@@ -30,20 +47,20 @@ import java.util.concurrent.ConcurrentHashMap;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
 
-public class LoadBalancerTest {
+public class SystemLoadCalculateTest {
 
-    private LoadBalancer loadBalancer;
+    private SystemLoadCalculate systemLoadCalculate;
 
     @BeforeEach
     void setUp() {
-        loadBalancer = new LoadBalancer();
+        systemLoadCalculate = new SystemLoadCalculate();
     }
 
     @Test
     @DisplayName("Step0: A newly created LoadBalancer should return the highest priority of 1.0")
     void newLoadBalancerShouldReturnMaxPriority() {
-        System.out.println(loadBalancer.calculateSchedulingPriority());
-        Assertions.assertEquals(1.0, loadBalancer.calculateSchedulingPriority());
+        System.out.println(systemLoadCalculate.calculateSchedulingPriority());
+        Assertions.assertEquals(1.0, systemLoadCalculate.calculateSchedulingPriority());
     }
 
     @Test
@@ -53,15 +70,15 @@ public class LoadBalancerTest {
                 () ->
                         assertThrows(
                                 IllegalArgumentException.class,
-                                () -> loadBalancer.addUtilizationData(-0.1, 0.5)),
+                                () -> systemLoadCalculate.addUtilizationData(-0.1, 0.5)),
                 () ->
                         assertThrows(
                                 IllegalArgumentException.class,
-                                () -> loadBalancer.addUtilizationData(0.5, 1.1)),
+                                () -> systemLoadCalculate.addUtilizationData(0.5, 1.1)),
                 () ->
                         assertThrows(
                                 IllegalArgumentException.class,
-                                () -> loadBalancer.addUtilizationData(1.1, 0.5)));
+                                () -> systemLoadCalculate.addUtilizationData(1.1, 0.5)));
     }
 
     @Test
@@ -69,12 +86,12 @@ public class LoadBalancerTest {
     void shouldCalculateCorrectPriorityForThreeRecords() {
         // Add 3 records
         // Oldest record
-        loadBalancer.addUtilizationData(0.5, 0.4); // CPU: 50%, Memory: 40%
-        loadBalancer.addUtilizationData(0.7, 0.6); // CPU: 70%, Memory: 60%
+        systemLoadCalculate.addUtilizationData(0.5, 0.4); // CPU: 50%, Memory: 40%
+        systemLoadCalculate.addUtilizationData(0.7, 0.6); // CPU: 70%, Memory: 60%
         // Newest record
-        loadBalancer.addUtilizationData(0.6, 0.5); // CPU: 60%, Memory: 50%
+        systemLoadCalculate.addUtilizationData(0.6, 0.5); // CPU: 60%, Memory: 50%
 
-        double priority = loadBalancer.calculateSchedulingPriority();
+        double priority = systemLoadCalculate.calculateSchedulingPriority();
 
         // Manually calculate the expected result
         // Weight distribution should be [4/8, 2/8, 2/8]
@@ -95,13 +112,13 @@ public class LoadBalancerTest {
     @DisplayName("Step1-3: Test weight calculation for 5 records")
     void shouldCalculateCorrectPriorityForFiveRecords() {
         // Add 5 records, from oldest to newest
-        loadBalancer.addUtilizationData(0.3, 0.2);
-        loadBalancer.addUtilizationData(0.4, 0.3);
-        loadBalancer.addUtilizationData(0.5, 0.4);
-        loadBalancer.addUtilizationData(0.7, 0.6);
-        loadBalancer.addUtilizationData(0.6, 0.5);
+        systemLoadCalculate.addUtilizationData(0.3, 0.2);
+        systemLoadCalculate.addUtilizationData(0.4, 0.3);
+        systemLoadCalculate.addUtilizationData(0.5, 0.4);
+        systemLoadCalculate.addUtilizationData(0.7, 0.6);
+        systemLoadCalculate.addUtilizationData(0.6, 0.5);
 
-        double priority = loadBalancer.calculateSchedulingPriority();
+        double priority = systemLoadCalculate.calculateSchedulingPriority();
 
         // Manually calculate the expected result
         // Weight distribution should be [4/10, 2/10, 2/10, 1/10, 1/10]
@@ -128,16 +145,16 @@ public class LoadBalancerTest {
     @DisplayName(
             "Step1-3: Detailed verification of adding 6 records (verifying the maximum window limit of 5)")
     void detailedCalculationForSixRecords() {
-        LoadBalancer loadBalancer = new LoadBalancer();
+        SystemLoadCalculate systemLoadCalculate = new SystemLoadCalculate();
 
         // Add 6 records in chronological order (from oldest to newest)
         // The first record will be discarded because it exceeds the window limit of 5
-        loadBalancer.addUtilizationData(0.2, 0.1); // Oldest record (will be discarded)
-        loadBalancer.addUtilizationData(0.3, 0.2); // Now the oldest record
-        loadBalancer.addUtilizationData(0.4, 0.3); // Fourth record
-        loadBalancer.addUtilizationData(0.5, 0.4); // Third record
-        loadBalancer.addUtilizationData(0.7, 0.6); // Second record
-        loadBalancer.addUtilizationData(0.6, 0.5); // Newest record
+        systemLoadCalculate.addUtilizationData(0.2, 0.1); // Oldest record (will be discarded)
+        systemLoadCalculate.addUtilizationData(0.3, 0.2); // Now the oldest record
+        systemLoadCalculate.addUtilizationData(0.4, 0.3); // Fourth record
+        systemLoadCalculate.addUtilizationData(0.5, 0.4); // Third record
+        systemLoadCalculate.addUtilizationData(0.7, 0.6); // Second record
+        systemLoadCalculate.addUtilizationData(0.6, 0.5); // Newest record
 
         double expectedPriority =
                 // Newest record: (1-0.6)*0.5 + (1-0.5)*0.5 * (4/10)
@@ -155,7 +172,7 @@ public class LoadBalancerTest {
                         // Oldest record: (1-0.3)*0.5 + (1-0.2)*0.5 * (1/10)
                         ((((1.0 - 0.3) * 0.5) + ((1.0 - 0.2) * 0.5)) * (1.0 / 10.0));
 
-        double actualPriority = loadBalancer.calculateSchedulingPriority();
+        double actualPriority = systemLoadCalculate.calculateSchedulingPriority();
 
         Assertions.assertEquals(expectedPriority, actualPriority);
     }
@@ -163,25 +180,28 @@ public class LoadBalancerTest {
     @Test
     @DisplayName("Step4: Test calculateComprehensiveResourceAvailability method")
     void testCalculateComprehensiveResourceAvailability() throws UnknownHostException {
-        // 假设综合资源空闲率为 0.8，Worker 节点已经连续分配了3个 Slot，这个值是通过实际内存和 CPU 计算得到
+        // Assume that the overall resource idle rate is 0.8, and the Worker node has been
+        // continuously allocated 3 slots. This value is calculated based on the actual memory and
+        // CPU.
         double comprehensiveResourceAvailability = 0.8;
 
-        LoadBalancer loadBalancer = new LoadBalancer();
+        SystemLoadCalculate systemLoadCalculate = new SystemLoadCalculate();
         WorkerProfile workerProfile = Mockito.mock(WorkerProfile.class);
-        when(workerProfile.getAddress()).thenReturn(new Address("127.0.0.1", 5701));
+        Address address = new Address("127.0.0.1", 5701);
+        when(workerProfile.getAddress()).thenReturn(address);
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[5]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[3]);
         Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots =
                 new ConcurrentHashMap<>();
 
-        // 每次任务是固定的 Slot 资源
+        // Each task has a fixed slot resource
         double singleSlotResource =
                 Math.round(((1 - comprehensiveResourceAvailability) / 5) * 100.0) / 100.0;
         int times = 0;
 
-        // worker 还未分配时，综合资源空闲率不变
+        // When the worker has not been assigned, the overall resource idle rate remains unchanged
         double result =
-                loadBalancer.calculateComprehensiveResourceAvailability(
+                systemLoadCalculate.calculateComprehensiveResourceAvailability(
                         comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
         double expected = comprehensiveResourceAvailability - (singleSlotResource * times);
         Assertions.assertEquals(expected, result, 0.01);
@@ -189,12 +209,13 @@ public class LoadBalancerTest {
                 comprehensiveResourceAvailability - (singleSlotResource * times), result, 0.01);
         Assertions.assertEquals(0.8, result, 0.01);
 
-        // worker 已经分配过1个 Slot
+        // The worker has been assigned 1 slot
         times = 1;
+        workerAssignedSlots.put(address, new ImmutableTriple<>(singleSlotResource, 1, 0));
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[6]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[2]);
         result =
-                loadBalancer.calculateComprehensiveResourceAvailability(
+                systemLoadCalculate.calculateComprehensiveResourceAvailability(
                         comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
         expected = comprehensiveResourceAvailability - (singleSlotResource * times);
         Assertions.assertEquals(expected, result, 0.01);
@@ -202,12 +223,13 @@ public class LoadBalancerTest {
                 comprehensiveResourceAvailability - (singleSlotResource * times), result, 0.01);
         Assertions.assertEquals(0.76, result, 0.01);
 
-        // worker 已经分配过2个 Slot
+        // The worker has been assigned 2 slots
         times = 2;
+        workerAssignedSlots.put(address, new ImmutableTriple<>(singleSlotResource, 2, 0));
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[7]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[1]);
         result =
-                loadBalancer.calculateComprehensiveResourceAvailability(
+                systemLoadCalculate.calculateComprehensiveResourceAvailability(
                         comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
         expected = comprehensiveResourceAvailability - (singleSlotResource * times);
         Assertions.assertEquals(expected, result, 0.01);
@@ -215,7 +237,7 @@ public class LoadBalancerTest {
                 comprehensiveResourceAvailability - (singleSlotResource * times), result, 0.01);
         Assertions.assertEquals(0.72, result, 0.01);
 
-        // 如果没有未分配 slot 不会执行
+        // If there is no unassigned slot, it will not be executed.
 
     }
 
@@ -225,7 +247,7 @@ public class LoadBalancerTest {
         WorkerProfile workerProfile = Mockito.mock(WorkerProfile.class);
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[3]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[7]);
-        double balanceFactor = loadBalancer.balanceFactor(workerProfile, 3);
+        double balanceFactor = systemLoadCalculate.balanceFactor(workerProfile, 3);
         Assertions.assertEquals(0.7, balanceFactor, 0.01);
     }
 
@@ -233,18 +255,20 @@ public class LoadBalancerTest {
     @DisplayName("All: Test the overall calculation logic")
     void testLoadBalancer() throws UnknownHostException {
 
-        // 验证方案一 : 拆分每一个步骤，验证每一个环节结算的指标是否准确
-        LoadBalancer loadBalancer = new LoadBalancer();
+        // Verification plan 1: Split each step and verify whether the settlement indicators of each
+        // link are accurate
+        SystemLoadCalculate systemLoadCalculate = new SystemLoadCalculate();
 
         // Add 6 records in chronological order (from oldest to newest)
         // The first record will be discarded because it exceeds the window limit of 5
-        loadBalancer.addUtilizationData(0.2, 0.1); // Oldest record (will be discarded)
-        loadBalancer.addUtilizationData(0.3, 0.2); // Now the oldest record
-        loadBalancer.addUtilizationData(0.4, 0.3); // Fourth record
-        loadBalancer.addUtilizationData(0.5, 0.4); // Third record
-        loadBalancer.addUtilizationData(0.7, 0.6); // Second record
-        loadBalancer.addUtilizationData(0.6, 0.5); // Newest record
-        double comprehensiveResourceAvailability = loadBalancer.calculateSchedulingPriority();
+        systemLoadCalculate.addUtilizationData(0.2, 0.1); // Oldest record (will be discarded)
+        systemLoadCalculate.addUtilizationData(0.3, 0.2); // Now the oldest record
+        systemLoadCalculate.addUtilizationData(0.4, 0.3); // Fourth record
+        systemLoadCalculate.addUtilizationData(0.5, 0.4); // Third record
+        systemLoadCalculate.addUtilizationData(0.7, 0.6); // Second record
+        systemLoadCalculate.addUtilizationData(0.6, 0.5); // Newest record
+        double comprehensiveResourceAvailability =
+                systemLoadCalculate.calculateSchedulingPriority();
         Address address = new Address("127.0.0.1", 5701);
         WorkerProfile workerProfile = Mockito.mock(WorkerProfile.class);
         when(workerProfile.getAddress()).thenReturn(address);
@@ -253,14 +277,14 @@ public class LoadBalancerTest {
         Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots =
                 new ConcurrentHashMap<>();
 
-        // 每次任务是固定的 Slot 资源
+        // Each task has a fixed Slot resource
         double singleSlotResource =
                 Math.round(((1 - comprehensiveResourceAvailability) / 5) * 100.0) / 100.0;
         int times = 0;
 
-        // worker 还未分配时，综合资源空闲率不变
+        // When the worker has not been assigned, the overall resource idle rate remains unchanged
         double result =
-                loadBalancer.calculateComprehensiveResourceAvailability(
+                systemLoadCalculate.calculateComprehensiveResourceAvailability(
                         comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
         double expected = comprehensiveResourceAvailability - (singleSlotResource * times);
         Assertions.assertEquals(expected, result, 0.01);
@@ -268,13 +292,13 @@ public class LoadBalancerTest {
                 comprehensiveResourceAvailability - (singleSlotResource * times), result, 0.01);
         Assertions.assertEquals(0.5, result, 0.01);
 
-        // worker 已经分配过1个 Slot
+        // The worker has been assigned 1 slot
         times = 1;
         workerAssignedSlots.put(address, new ImmutableTriple<>(singleSlotResource, 1, 0));
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[6]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[2]);
         result =
-                loadBalancer.calculateComprehensiveResourceAvailability(
+                systemLoadCalculate.calculateComprehensiveResourceAvailability(
                         comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
         expected = comprehensiveResourceAvailability - (singleSlotResource * times);
         Assertions.assertEquals(expected, result, 0.01);
@@ -286,18 +310,19 @@ public class LoadBalancerTest {
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[7]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[1]);
         result =
-                loadBalancer.calculateComprehensiveResourceAvailability(
+                systemLoadCalculate.calculateComprehensiveResourceAvailability(
                         comprehensiveResourceAvailability, workerProfile, workerAssignedSlots);
-        double balanceFactor = loadBalancer.balanceFactor(workerProfile, 7);
+        double balanceFactor = systemLoadCalculate.balanceFactor(workerProfile, 7);
         Assertions.assertEquals(0.12, balanceFactor, 0.01);
 
         double finalResult = 0.7 * 0.3 + 0.125 * 0.3;
         Assertions.assertEquals(
                 finalResult,
-                loadBalancer.calculateResourceAvailability(result, balanceFactor),
+                systemLoadCalculate.calculateResourceAvailability(result, balanceFactor),
                 0.01);
 
-        // 验证方案二 : 模拟实际场景调用calculateWeight方法验证最终结果，验证和 step1 结果是否一致
+        // Verification plan 2: simulate the actual scenario and call the calculateWeight method to
+        // verify the final result and whether it is consistent with the result of step 1
         Map<Address, SystemLoad> workerLoadMap = new ConcurrentHashMap<>();
         SystemLoad systemLoad = new SystemLoad();
         LinkedHashMap<String, SystemLoad.SystemLoadInfo> metrics = new LinkedHashMap<>();
@@ -309,7 +334,7 @@ public class LoadBalancerTest {
         systemLoad.setMetrics(metrics);
         workerLoadMap.put(address, systemLoad);
 
-        // 模拟当前节点资源
+        // Mock current node resources
         WorkerProfile workerProfile2 = Mockito.mock(WorkerProfile.class);
         when(workerProfile2.getAssignedSlots()).thenReturn(new SlotProfile[5]);
         when(workerProfile2.getUnassignedSlots()).thenReturn(new SlotProfile[3]);
@@ -319,18 +344,18 @@ public class LoadBalancerTest {
                 new ConcurrentHashMap<>();
         List<ResourceProfile> resourceProfiles = new ArrayList<>();
         resourceProfiles.add(new ResourceProfile());
-        // 模拟 ResourceManager
+        // Mock ResourceManager
         AbstractResourceManager rm = Mockito.mock(AbstractResourceManager.class);
         when(rm.getEngineConfig()).thenReturn(Mockito.mock(EngineConfig.class));
         when(rm.getEngineConfig().getSlotServiceConfig())
                 .thenReturn(Mockito.mock(SlotServiceConfig.class));
         when(rm.getEngineConfig().getSlotServiceConfig().getAllocateStrategy())
                 .thenReturn(ServerConfigOptions.SLOT_ALLOCATE_STRATEGY.defaultValue());
-        // 模拟 ResourceRequestHandler 调用 calculateWeight 计算权重
+        // Simulate ResourceRequestHandler to call calculateWeight to calculate weight
         ResourceRequestHandler resourceRequestHandler =
                 new ResourceRequestHandler(1L, resourceProfiles, null, rm, workerLoadMap);
         resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2);
-        // 模拟申请资源
+        // Mock Application Resources
         workerAssignedSlots2.put(address, new ImmutableTriple<>(singleSlotResource, 1, 5));
         when(workerProfile2.getAssignedSlots()).thenReturn(new SlotProfile[6]);
         when(workerProfile2.getUnassignedSlots()).thenReturn(new SlotProfile[2]);
@@ -339,6 +364,7 @@ public class LoadBalancerTest {
         workerAssignedSlots2.put(address, new ImmutableTriple<>(singleSlotResource, 2, 5));
         when(workerProfile2.getAssignedSlots()).thenReturn(new SlotProfile[7]);
         when(workerProfile2.getUnassignedSlots()).thenReturn(new SlotProfile[1]);
+        // Verity
         Assertions.assertEquals(
                 resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2),
                 finalResult);
