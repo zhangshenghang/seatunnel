@@ -17,11 +17,12 @@
 
 package org.apache.seatunnel.engine.server.utils;
 
-import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 
 import org.apache.commons.lang3.tuple.ImmutableTriple;
 
+import com.google.common.collect.EvictingQueue;
 import com.hazelcast.cluster.Address;
 
 import java.util.LinkedList;
@@ -119,22 +120,20 @@ public class SystemLoadCalculate {
     }
 
     public double calculate(
-            SystemLoad systemLoads,
+            EvictingQueue<SystemLoadInfo> systemLoads,
             WorkerProfile workerProfile,
             Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
-        if (Objects.isNull(systemLoads) || systemLoads.getMetrics().isEmpty()) {
+        if (Objects.isNull(systemLoads) || systemLoads.isEmpty()) {
             // If the node load is not obtained, zero is returned. This only happens when the
             // service is just started and the load status has not yet been obtained.
             return 0.0;
         }
-        systemLoads
-                .getMetrics()
-                .forEach(
-                        (k, v) -> {
-                            Double cpuPercentage = v.getCpuPercentage();
-                            Double memPercentage = v.getMemPercentage();
-                            this.addUtilizationData(cpuPercentage, memPercentage);
-                        });
+        systemLoads.forEach(
+                v -> {
+                    Double cpuPercentage = v.getCpuPercentage();
+                    Double memPercentage = v.getMemPercentage();
+                    this.addUtilizationData(cpuPercentage, memPercentage);
+                });
         // step3.The comprehensive resource idle rate calculated
         double comprehensiveResourceAvailability = this.calculateSchedulingPriority();
         // step4
@@ -190,7 +189,6 @@ public class SystemLoadCalculate {
         }
 
         Integer assignedTimesForTask = tuple2.middle;
-        System.out.println(assignedTimesForTask);
         // Calculate the weight of the current task on the Worker node, step 4 completed
         comprehensiveResourceAvailability =
                 comprehensiveResourceAvailability - (assignedTimesForTask * singleSlotUseResource);

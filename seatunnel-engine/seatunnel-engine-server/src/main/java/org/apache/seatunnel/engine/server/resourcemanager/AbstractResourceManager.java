@@ -22,15 +22,15 @@ import org.apache.seatunnel.engine.common.runtime.ExecutionMode;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.ReleaseSlotOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.ResetResourceOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.SyncWorkerProfileOperation;
-import org.apache.seatunnel.engine.server.resourcemanager.opeartion.WorkerSystemLoadOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
-import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.utils.NodeEngineUtil;
 
 import org.apache.commons.lang3.tuple.ImmutableTriple;
 
+import com.google.common.collect.EvictingQueue;
 import com.hazelcast.cluster.Address;
 import com.hazelcast.cluster.Member;
 import com.hazelcast.internal.services.MembershipServiceEvent;
@@ -43,7 +43,6 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -52,7 +51,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -74,7 +72,7 @@ public abstract class AbstractResourceManager implements ResourceManager {
 
     private static final long DEFAULT_SYSTEM_LOAD_PERIOD = 10000;
 
-    private Map<Address, SystemLoad> workerLoadMap;
+    private Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap;
 
     @Setter @Getter
     private Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
@@ -128,67 +126,7 @@ public abstract class AbstractResourceManager implements ResourceManager {
                         .collect(Collectors.toList());
         futures.forEach(CompletableFuture::join);
 
-        scheduledExecutorService.scheduleAtFixedRate(
-                () -> {
-                    try {
-                        log.debug(
-                                "start send system load to resource manager, this address: "
-                                        + nodeEngine.getClusterService().getThisAddress());
-                        updateWorkerSystemLoad();
-                    } catch (Exception e) {
-                        log.warn(
-                                "failed send system load to resource manager, will retry later. this address: "
-                                        + nodeEngine.getClusterService().getThisAddress());
-                    }
-                },
-                0,
-                DEFAULT_SYSTEM_LOAD_PERIOD,
-                TimeUnit.MILLISECONDS);
         log.info("registerWorker: {}", registerWorker);
-    }
-
-    private void updateWorkerSystemLoad() {
-        nodeEngine.getClusterService().getMembers().stream()
-                .map(Member::getAddress)
-                .forEach(this::collectAndUpdateSystemLoad);
-    }
-
-    private void collectAndUpdateSystemLoad(Address node) {
-        sendToMember(new WorkerSystemLoadOperation(), node)
-                .thenAccept(
-                        systemLoad -> {
-                            if (Objects.isNull(systemLoad)) {
-                                return;
-                            }
-
-                            SystemLoad currentSystemLoad =
-                                    workerLoadMap.computeIfAbsent(node, k -> new SystemLoad());
-
-                            updateSystemLoadMetrics(currentSystemLoad, (SystemLoad) systemLoad);
-
-                            log.debug(
-                                    "received system load from worker: {}, system load: {}",
-                                    node,
-                                    workerLoadMap.get(node));
-                        });
-    }
-
-    private void updateSystemLoadMetrics(SystemLoad currentSystemLoad, SystemLoad newSystemLoad) {
-        LinkedHashMap<String, SystemLoad.SystemLoadInfo> metrics = currentSystemLoad.getMetrics();
-
-        if (metrics == null) {
-            metrics = new LinkedHashMap<>();
-            currentSystemLoad.setMetrics(metrics);
-        }
-
-        // Keep up to 5 historical records
-        while (metrics.size() >= 5) {
-            String firstKey = metrics.keySet().iterator().next();
-            metrics.remove(firstKey);
-        }
-
-        // Update system load information
-        metrics.putAll(newSystemLoad.getMetrics());
     }
 
     @Override
@@ -330,6 +268,11 @@ public abstract class AbstractResourceManager implements ResourceManager {
             log.debug("received worker heartbeat from: " + workerProfile.getAddress());
         }
         registerWorker.put(workerProfile.getAddress(), workerProfile);
+        if (Objects.nonNull(workerProfile.getSystemLoadInfo())) {
+            workerLoadMap
+                    .computeIfAbsent(workerProfile.getAddress(), k -> EvictingQueue.create(5))
+                    .offer(workerProfile.getSystemLoadInfo());
+        }
     }
 
     @Override

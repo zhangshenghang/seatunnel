@@ -24,7 +24,7 @@ import org.apache.seatunnel.engine.server.resourcemanager.AbstractResourceManage
 import org.apache.seatunnel.engine.server.resourcemanager.ResourceRequestHandler;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
-import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 
 import org.apache.commons.lang3.tuple.ImmutableTriple;
@@ -35,11 +35,11 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import com.google.common.collect.EvictingQueue;
 import com.hazelcast.cluster.Address;
 
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -322,16 +322,22 @@ public class SystemLoadCalculateTest {
 
         // Verification plan 2: simulate the actual scenario and call the calculateWeight method to
         // verify the final result and whether it is consistent with the result of step 1
-        Map<Address, SystemLoad> workerLoadMap = new ConcurrentHashMap<>();
-        SystemLoad systemLoad = new SystemLoad();
-        LinkedHashMap<String, SystemLoad.SystemLoadInfo> metrics = new LinkedHashMap<>();
-        metrics.put("20200101000001", new SystemLoad.SystemLoadInfo(0.3, 0.2));
-        metrics.put("20200101000002", new SystemLoad.SystemLoadInfo(0.4, 0.3));
-        metrics.put("20200101000003", new SystemLoad.SystemLoadInfo(0.5, 0.4));
-        metrics.put("20200101000004", new SystemLoad.SystemLoadInfo(0.7, 0.6));
-        metrics.put("20200101000005", new SystemLoad.SystemLoadInfo(0.6, 0.5));
-        systemLoad.setMetrics(metrics);
-        workerLoadMap.put(address, systemLoad);
+        Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap = new ConcurrentHashMap<>();
+        workerLoadMap
+                .computeIfAbsent(address, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.3, 0.2));
+        workerLoadMap
+                .computeIfAbsent(address, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.4, 0.3));
+        workerLoadMap
+                .computeIfAbsent(address, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.5, 0.4));
+        workerLoadMap
+                .computeIfAbsent(address, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.7, 0.6));
+        workerLoadMap
+                .computeIfAbsent(address, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.6, 0.5));
 
         // Mock current node resources
         WorkerProfile workerProfile2 = Mockito.mock(WorkerProfile.class);

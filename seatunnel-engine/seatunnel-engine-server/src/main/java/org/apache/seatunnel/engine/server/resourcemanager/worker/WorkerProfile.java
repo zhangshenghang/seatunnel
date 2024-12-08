@@ -19,6 +19,7 @@ package org.apache.seatunnel.engine.server.resourcemanager.worker;
 
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.serializable.ResourceDataSerializerHook;
 
 import com.hazelcast.cluster.Address;
@@ -49,6 +50,8 @@ public class WorkerProfile implements IdentifiedDataSerializable {
     private SlotProfile[] unassignedSlots;
 
     private Map<String, String> attributes;
+
+    private SystemLoadInfo systemLoadInfo;
 
     public WorkerProfile(Address address) {
         this.address = address;
@@ -101,6 +104,7 @@ public class WorkerProfile implements IdentifiedDataSerializable {
         }
         out.writeBoolean(dynamicSlot);
         out.writeObject(attributes);
+        out.writeObject(systemLoadInfo);
     }
 
     @Override
@@ -120,5 +124,6 @@ public class WorkerProfile implements IdentifiedDataSerializable {
         }
         dynamicSlot = in.readBoolean();
         attributes = in.readObject();
+        systemLoadInfo = in.readObject();
     }
 }

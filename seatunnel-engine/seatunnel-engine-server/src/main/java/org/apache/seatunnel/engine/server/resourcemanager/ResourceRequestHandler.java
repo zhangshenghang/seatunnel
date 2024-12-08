@@ -21,16 +21,21 @@ import org.apache.seatunnel.shade.com.google.common.annotations.VisibleForTestin
 
 import org.apache.seatunnel.engine.common.config.server.AllocateStrategy;
 import org.apache.seatunnel.engine.common.runtime.DeployType;
+import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.RandomStrategy;
+import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.SlotAllocationStrategy;
+import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.SlotRatioStrategy;
+import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.SystemLoadStrategy;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.RequestSlotOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
-import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoad;
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.service.slot.SlotAndWorkerProfile;
 import org.apache.seatunnel.engine.server.utils.SystemLoadCalculate;
 
 import org.apache.commons.lang3.tuple.ImmutableTriple;
 
+import com.google.common.collect.EvictingQueue;
 import com.hazelcast.cluster.Address;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
@@ -38,7 +43,6 @@ import com.hazelcast.logging.Logger;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -73,7 +77,7 @@ public class ResourceRequestHandler {
     private final AllocateStrategy allocateStrategy;
 
     // The load of each worker node
-    private final Map<Address, SystemLoad> workerLoadMap;
+    private final Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap;
 
     // ImmutableTriple <the estimated resource usage ratio of a single node, the number of slot
     // applications, and the number of records before resource application>
@@ -84,7 +88,7 @@ public class ResourceRequestHandler {
             List<ResourceProfile> resourceProfile,
             ConcurrentMap<Address, WorkerProfile> registerWorker,
             AbstractResourceManager resourceManager,
-            Map<Address, SystemLoad> workerLoadMap) {
+            Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap) {
         this.completableFuture = new CompletableFuture<>();
         this.resultSlotProfiles = new ConcurrentHashMap<>();
         this.jobId = jobId;
@@ -252,54 +256,28 @@ public class ResourceRequestHandler {
                                                                         .enoughThan(r)))
                         .collect(Collectors.toList());
 
-        Optional<WorkerProfile> workerProfile;
+        SlotAllocationStrategy strategy;
         switch (allocateStrategy) {
             case SYSTEM_LOAD:
-                workerProfile =
-                        availableWorkers.stream()
-                                .max(
-                                        Comparator.comparingDouble(
-                                                w -> calculateWeight(w, workerAssignedSlots)));
-                workerProfile.ifPresent(
-                        profile -> {
-                            workerAssignedSlots.merge(
-                                    profile.getAddress(),
-                                    new ImmutableTriple<>(
-                                            0.0, 1, profile.getAssignedSlots().length),
-                                    (oldVal, newVal) ->
-                                            new ImmutableTriple<>(
-                                                    oldVal.left, oldVal.middle + 1, oldVal.right));
-
-                            LOGGER.fine("Selected worker: " + profile.getAddress());
-                        });
+                strategy = new SystemLoadStrategy(workerLoadMap);
+                break;
+            case SLOT_RATIO:
+                strategy = new SlotRatioStrategy(workerAssignedSlots);
                 break;
             case RANDOM:
-                // Randomly obtain a worker
-                Collections.shuffle(availableWorkers);
-                Collections.shuffle(workerProfiles);
-                workerProfile = availableWorkers.stream().findFirst();
-                break;
             default:
-                // The slot usage rate strategy is used by default. The lower the slot usage rate,
-                // the higher the priority.
-                workerProfile =
-                        availableWorkers.stream()
-                                .min(Comparator.comparingDouble(this::calculateSlotUsage));
-                workerProfile.ifPresent(
-                        profile -> {
-                            workerAssignedSlots.merge(
-                                    profile.getAddress(),
-                                    new ImmutableTriple<>(
-                                            0.0, 1, profile.getAssignedSlots().length),
-                                    (oldVal, newVal) ->
-                                            new ImmutableTriple<>(
-                                                    0.0, oldVal.middle + 1, oldVal.right));
-                            LOGGER.fine("Selected worker: " + profile.getAddress());
-                        });
+                strategy = new RandomStrategy();
+                break;
         }
+
+        Optional<WorkerProfile> workerProfile =
+                strategy.selectWorker(availableWorkers, workerAssignedSlots);
 
         if (!workerProfile.isPresent()) {
             // Check if there are still unassigned resources
+            if (allocateStrategy == AllocateStrategy.RANDOM) {
+                Collections.shuffle(workerProfiles);
+            }
             workerProfile =
                     workerProfiles.stream()
                             .filter(WorkerProfile::isDynamicSlot)

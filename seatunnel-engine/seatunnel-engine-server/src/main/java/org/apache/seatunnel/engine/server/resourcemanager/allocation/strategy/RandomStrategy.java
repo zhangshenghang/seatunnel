@@ -15,25 +15,27 @@
  * limitations under the License.
  */
 
-package org.apache.seatunnel.engine.server.resourcemanager.resource;
+package org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
+import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 
-import java.io.Serializable;
-import java.util.LinkedHashMap;
+import org.apache.commons.lang3.tuple.ImmutableTriple;
 
-@Data
-public class SystemLoad implements Serializable {
-    private LinkedHashMap<String, SystemLoadInfo> metrics;
+import com.hazelcast.cluster.Address;
 
-    @AllArgsConstructor
-    @NoArgsConstructor
-    @Data
-    public static class SystemLoadInfo implements Serializable {
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
-        private Double memPercentage;
-        private Double cpuPercentage;
+/** RandomStrategy is a strategy that selects the worker randomly. */
+public class RandomStrategy implements SlotAllocationStrategy {
+
+    @Override
+    public Optional<WorkerProfile> selectWorker(
+            List<WorkerProfile> availableWorkers,
+            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
+        Collections.shuffle(availableWorkers);
+        return availableWorkers.stream().findFirst();
     }
 }
