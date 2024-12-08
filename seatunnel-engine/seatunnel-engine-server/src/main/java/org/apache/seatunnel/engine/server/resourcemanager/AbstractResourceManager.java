@@ -49,8 +49,6 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -67,10 +65,6 @@ public abstract class AbstractResourceManager implements ResourceManager {
     @Getter private final EngineConfig engineConfig;
 
     private volatile boolean isRunning = true;
-
-    private ScheduledExecutorService scheduledExecutorService;
-
-    private static final long DEFAULT_SYSTEM_LOAD_PERIOD = 10000;
 
     private Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap;
 
@@ -93,14 +87,6 @@ public abstract class AbstractResourceManager implements ResourceManager {
 
     private void initWorker() {
         log.info("initWorker... ");
-        scheduledExecutorService =
-                Executors.newSingleThreadScheduledExecutor(
-                        r ->
-                                new Thread(
-                                        r,
-                                        String.format(
-                                                "hz.%s.seaTunnel.ResourceManager.thread",
-                                                nodeEngine.getHazelcastInstance().getName())));
         List<Address> aliveNode =
                 nodeEngine.getClusterService().getMembers().stream()
                         .map(Member::getAddress)

@@ -374,4 +374,201 @@ public class SystemLoadCalculateTest {
                 resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2),
                 finalResult);
     }
+
+    /**
+     * Test Multi-Node System Load Balancing:
+     *
+     * <p>This test simulates the load distribution between two nodes, gradually increasing each
+     * node's load to verify the system's load balancing algorithm. The main steps include creating
+     * nodes, adding load information, configuring resource management components, calculating node
+     * weights, and finally allocating slots based on these weights.
+     *
+     * <p>Specific Process: <br>
+     * - Initialize two nodes (address1 and address2), each with a pre-added 5 load entries. <br>
+     * - Configure ResourceManager and ResourceRequestHandler for handling resource requests and
+     * calculating weights. <br>
+     * - Create workerProfile1 and workerProfile2, representing two worker nodes, and set their
+     * allocated and unallocated slots. <br>
+     * - Initially, it is expected that the first node has a higher weight (0.78 vs the second
+     * node's 0.41), leading to the preference of the first node for allocation. <br>
+     * - Gradually allocate slots to the first node (from 1 to 4), recalculating weights after each
+     * allocation and noting changes: <br>
+     * - After allocating 1 slot: the first node's weight drops to 0.68; <br>
+     * - After allocating 2 slots: the first node's weight drops to 0.58; <br>
+     * - After allocating 3 slots: the first node's weight drops to 0.48; <br>
+     * - After allocating 4 slots: the first node's weight drops to 0.38, at which point the second
+     * node has a higher weight (0.41), switching preference to the second node. <br>
+     * - Finally, allocate one slot to the second node, updating its weight to 0.31, and again
+     * choosing the first node for allocation. <br>
+     * <br>
+     * Each slot consumes a fixed amount of resources, set to 0.1 in this test case. This test
+     * ensures that the load balancing algorithm can make reasonable resource allocation decisions
+     * based on the current load situation of the nodes. <br>
+     */
+    @Test
+    @DisplayName("All: Test multiple node system load")
+    void testMultipleNodeSystemLoad() throws UnknownHostException {
+        Address address1 = new Address("127.0.0.1", 5701);
+        Address address2 = new Address("127.0.0.1", 5702);
+
+        // Simulate the actual scenario and call the calculateWeight method to verify the final
+        // result
+        Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap = new ConcurrentHashMap<>();
+        workerLoadMap
+                .computeIfAbsent(address1, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.2, 0.1));
+        workerLoadMap
+                .computeIfAbsent(address1, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.3, 0.2));
+        workerLoadMap
+                .computeIfAbsent(address1, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.4, 0.3));
+        workerLoadMap
+                .computeIfAbsent(address1, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.4, 0.4));
+        workerLoadMap
+                .computeIfAbsent(address1, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.3, 0.3));
+
+        workerLoadMap
+                .computeIfAbsent(address2, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.8, 0.7));
+        workerLoadMap
+                .computeIfAbsent(address2, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.9, 0.8));
+        workerLoadMap
+                .computeIfAbsent(address2, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.85, 0.75));
+        workerLoadMap
+                .computeIfAbsent(address2, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.9, 0.85));
+        workerLoadMap
+                .computeIfAbsent(address2, v -> EvictingQueue.create(5))
+                .offer(new SystemLoadInfo(0.88, 0.8));
+
+        // Mock current node resources
+        WorkerProfile workerProfile2 = Mockito.mock(WorkerProfile.class);
+        when(workerProfile2.getAssignedSlots()).thenReturn(new SlotProfile[0]);
+        when(workerProfile2.getUnassignedSlots()).thenReturn(new SlotProfile[10]);
+        when(workerProfile2.getAddress()).thenReturn(address2);
+
+        List<ResourceProfile> resourceProfiles = new ArrayList<>();
+        resourceProfiles.add(new ResourceProfile());
+
+        // Mock ResourceManager
+        AbstractResourceManager rm = Mockito.mock(AbstractResourceManager.class);
+        when(rm.getEngineConfig()).thenReturn(Mockito.mock(EngineConfig.class));
+        when(rm.getEngineConfig().getSlotServiceConfig())
+                .thenReturn(Mockito.mock(SlotServiceConfig.class));
+        when(rm.getEngineConfig().getSlotServiceConfig().getAllocateStrategy())
+                .thenReturn(ServerConfigOptions.SLOT_ALLOCATE_STRATEGY.defaultValue());
+
+        WorkerProfile workerProfile1 = Mockito.mock(WorkerProfile.class);
+        when(workerProfile1.getAssignedSlots()).thenReturn(new SlotProfile[0]);
+        when(workerProfile1.getUnassignedSlots()).thenReturn(new SlotProfile[10]);
+        when(workerProfile1.getAddress()).thenReturn(address1);
+        // Simulate ResourceRequestHandler to call calculateWeight to calculate weight
+        ResourceRequestHandler resourceRequestHandler =
+                new ResourceRequestHandler(1L, resourceProfiles, null, rm, workerLoadMap);
+
+        Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots1 =
+                new ConcurrentHashMap<>();
+        Double calculateWeight1 =
+                resourceRequestHandler.calculateWeight(workerProfile1, workerAssignedSlots1);
+        System.out.println("Node1 initialization weight: " + calculateWeight1);
+
+        Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots2 =
+                new ConcurrentHashMap<>();
+        Double calculateWeight2 =
+                resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2);
+        System.out.println("Node2 initialization weight: " + calculateWeight2);
+
+        // First node load is low, second node load is high, first node weight should be greater
+        // than second node
+        Assertions.assertTrue(calculateWeight1 > calculateWeight2);
+
+        // Tip: Here, we default to singleSlotUseResource=0.1 for easy verification of the accuracy
+        // of the results. The singleSlotUseResource for the load can refer to the class:
+        // org.apache.setannel.engine.E2e.allocatestgy SystemLoadAllocateStrategyIT
+        double singleSlotUseResource = 0.1;
+
+        // First node is assigned a slot
+        workerAssignedSlots1.put(address1, new ImmutableTriple<>(singleSlotUseResource, 1, 0));
+        when(workerProfile1.getAssignedSlots()).thenReturn(new SlotProfile[1]);
+        when(workerProfile1.getUnassignedSlots()).thenReturn(new SlotProfile[9]);
+        calculateWeight1 =
+                resourceRequestHandler.calculateWeight(workerProfile1, workerAssignedSlots1);
+        calculateWeight2 =
+                resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2);
+        System.out.println(
+                "Second allocation weight: Node 1: "
+                        + calculateWeight1
+                        + ", Node 2: "
+                        + calculateWeight2);
+        Assertions.assertTrue(calculateWeight1 > calculateWeight2);
+
+        // First node is assigned two slots
+        workerAssignedSlots1.put(address1, new ImmutableTriple<>(singleSlotUseResource, 2, 0));
+        when(workerProfile1.getAssignedSlots()).thenReturn(new SlotProfile[2]);
+        when(workerProfile1.getUnassignedSlots()).thenReturn(new SlotProfile[8]);
+        calculateWeight1 =
+                resourceRequestHandler.calculateWeight(workerProfile1, workerAssignedSlots1);
+        calculateWeight2 =
+                resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2);
+        System.out.println(
+                "Third allocation weight: Node 1: "
+                        + calculateWeight1
+                        + ", Node 2: "
+                        + calculateWeight2);
+        Assertions.assertTrue(calculateWeight1 > calculateWeight2);
+
+        // First node is assigned three slots
+        workerAssignedSlots1.put(address1, new ImmutableTriple<>(singleSlotUseResource, 3, 0));
+        when(workerProfile1.getAssignedSlots()).thenReturn(new SlotProfile[3]);
+        when(workerProfile1.getUnassignedSlots()).thenReturn(new SlotProfile[7]);
+        calculateWeight1 =
+                resourceRequestHandler.calculateWeight(workerProfile1, workerAssignedSlots1);
+        calculateWeight2 =
+                resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2);
+        System.out.println(
+                "Fourth allocation weight: Node 1: "
+                        + calculateWeight1
+                        + ", Node 2: "
+                        + calculateWeight2);
+        Assertions.assertTrue(calculateWeight1 > calculateWeight2);
+
+        // First node is assigned four slots
+        workerAssignedSlots1.put(address1, new ImmutableTriple<>(singleSlotUseResource, 4, 0));
+        when(workerProfile1.getAssignedSlots()).thenReturn(new SlotProfile[4]);
+        when(workerProfile1.getUnassignedSlots()).thenReturn(new SlotProfile[6]);
+        calculateWeight1 =
+                resourceRequestHandler.calculateWeight(workerProfile1, workerAssignedSlots1);
+        calculateWeight2 =
+                resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2);
+        System.out.println(
+                "Fifth allocation weight: Node 1: "
+                        + calculateWeight1
+                        + ", Node 2: "
+                        + calculateWeight2);
+        // After applying for resources five times, the weight of the first node should be less than
+        // the second node because the estimated resource usage rate of a single slot is 0.1
+        Assertions.assertTrue(calculateWeight1 < calculateWeight2);
+
+        // Second node is assigned one slot
+        workerAssignedSlots2.put(address2, new ImmutableTriple<>(singleSlotUseResource, 1, 0));
+        when(workerProfile1.getAssignedSlots()).thenReturn(new SlotProfile[1]);
+        when(workerProfile1.getUnassignedSlots()).thenReturn(new SlotProfile[9]);
+        calculateWeight1 =
+                resourceRequestHandler.calculateWeight(workerProfile1, workerAssignedSlots1);
+        calculateWeight2 =
+                resourceRequestHandler.calculateWeight(workerProfile2, workerAssignedSlots2);
+        System.out.println(
+                "Sixth allocation weight: Node 1: "
+                        + calculateWeight1
+                        + ", Node 2: "
+                        + calculateWeight2);
+        // After applying for resources five times, the weight of the first node should be less than
+        // the second node because the estimated resource usage rate of a single slot is 0.1
+        Assertions.assertTrue(calculateWeight1 > calculateWeight2);
+    }
 }
