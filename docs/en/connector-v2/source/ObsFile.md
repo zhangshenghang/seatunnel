@@ -49,9 +49,9 @@ It only supports hadoop version **2.9.X+**.
 | okhttp             | support version >= 3.11.0   | [Download](https://repo1.maven.org/maven2/com/squareup/okhttp3/okhttp/)                                        |
 | okio               | support version >= 1.14.0   | [Download](https://repo1.maven.org/maven2/com/squareup/okio/okio/)                                             |
 
-> Please download the support list corresponding to 'Maven' and copy them to the '$SEATNUNNEL_HOME/plugins/jdbc/lib/' working directory.
+> Please download the support list corresponding to 'Maven' and copy them to the '$SEATUNNEL_HOME/plugins/jdbc/lib/' working directory.
 >
-> And copy all jars to $SEATNUNNEL_HOME/lib/
+> And copy all jars to $SEATUNNEL_HOME/lib/
 
 ## Options
 
