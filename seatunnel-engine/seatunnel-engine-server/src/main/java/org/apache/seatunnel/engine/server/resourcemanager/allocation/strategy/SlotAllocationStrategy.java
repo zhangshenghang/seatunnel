@@ -27,7 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-// Java
+/** Slot allocation strategy interface. */
 public interface SlotAllocationStrategy {
     Optional<WorkerProfile> selectWorker(
             List<WorkerProfile> availableWorkers,

@@ -32,7 +32,6 @@ import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.service.slot.SlotAndWorkerProfile;
-import org.apache.seatunnel.engine.server.utils.SystemLoadCalculate;
 
 import org.apache.commons.lang3.tuple.ImmutableTriple;
 
@@ -232,14 +231,6 @@ public class ResourceRequestHandler {
                         }));
     }
 
-    public Double calculateWeight(
-            WorkerProfile workerProfile,
-            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
-        SystemLoadCalculate systemLoadCalculate = new SystemLoadCalculate();
-        return systemLoadCalculate.calculate(
-                workerLoadMap.get(workerProfile.getAddress()), workerProfile, workerAssignedSlots);
-    }
-
     @VisibleForTesting
     public Optional<WorkerProfile> preCheckWorkerResource(ResourceProfile r) {
         List<WorkerProfile> workerProfiles =
@@ -286,31 +277,6 @@ public class ResourceRequestHandler {
         }
 
         return workerProfile;
-    }
-
-    /**
-     * Calculate the slot usage rate of the worker
-     *
-     * @param worker WorkerProfile
-     * @return slot usage rate, range 0.0-1.0
-     */
-    private double calculateSlotUsage(WorkerProfile worker) {
-        ImmutableTriple<Double, Integer, Integer> immutableTriple =
-                workerAssignedSlots.get(worker.getAddress());
-        // If we manually record the number of assigned slots, we use that number, since
-        // worker.getAssignedSlots is not updated in real time.
-        int assignedSlots =
-                (immutableTriple != null)
-                        ? immutableTriple.middle
-                        : worker.getAssignedSlots().length;
-        workerAssignedSlots.put(worker.getAddress(), new ImmutableTriple<>(0.0, assignedSlots, 0));
-
-        int totalSlots = worker.getUnassignedSlots().length + worker.getAssignedSlots().length;
-        if (totalSlots == 0) {
-            return 1.0;
-        }
-
-        return (double) assignedSlots / totalSlots;
     }
 
     /**
