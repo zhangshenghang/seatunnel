@@ -92,10 +92,6 @@ public class OracleCDCIT extends AbstractOracleCDCIT implements TestResource {
     }
 
     @TestTemplate
-    @DisabledOnContainer(
-            value = {},
-            type = {EngineType.SPARK, EngineType.FLINK},
-            disabledReason = "Currently SPARK do not support cdc")
     public void testOracleCdcPartition(TestContainer container) throws Exception {
         String sourceTable = "PARTITION_SOURCE_TABLE";
         String sinkTable = "PARTITION_SINK_TABLE";
