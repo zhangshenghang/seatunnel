@@ -17,6 +17,8 @@
 
 package org.apache.seatunnel.engine.server.utils;
 
+import org.apache.seatunnel.shade.com.google.common.collect.EvictingQueue;
+
 import org.apache.seatunnel.engine.common.config.EngineConfig;
 import org.apache.seatunnel.engine.common.config.server.ServerConfigOptions;
 import org.apache.seatunnel.engine.common.config.server.SlotServiceConfig;
@@ -35,7 +37,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
-import com.google.common.collect.EvictingQueue;
 import com.hazelcast.cluster.Address;
 
 import java.net.UnknownHostException;
