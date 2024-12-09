@@ -24,7 +24,6 @@ import org.apache.seatunnel.engine.server.resourcemanager.opeartion.RequestSlotO
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.ResetResourceOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.SyncWorkerProfileOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.WorkerHeartbeatOperation;
-import org.apache.seatunnel.engine.server.resourcemanager.opeartion.WorkerSystemLoadOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.service.slot.SlotAndWorkerProfile;
@@ -53,8 +52,6 @@ public class ResourceDataSerializerHook implements DataSerializerHook {
     public static final int SYNC_SLOT_SERVICE_STATUS_TYPE = 8;
 
     public static final int REQUEST_SLOT_INFO_TYPE = 9;
-
-    public static final int SYSTEM_LOAD_TYPE = 10;
 
     public static final int FACTORY_ID =
             FactoryIdHelper.getFactoryId(
@@ -94,8 +91,6 @@ public class ResourceDataSerializerHook implements DataSerializerHook {
                     return new SyncWorkerProfileOperation();
                 case REQUEST_SLOT_INFO_TYPE:
                     return new GetOverviewOperation();
-                case SYSTEM_LOAD_TYPE:
-                    return new WorkerSystemLoadOperation();
                 default:
                     throw new IllegalArgumentException("Unknown type id " + typeId);
             }
