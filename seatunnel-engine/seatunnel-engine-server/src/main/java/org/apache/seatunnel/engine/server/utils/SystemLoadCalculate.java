@@ -17,12 +17,13 @@
 
 package org.apache.seatunnel.engine.server.utils;
 
+import org.apache.seatunnel.shade.com.google.common.collect.EvictingQueue;
+
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 
 import org.apache.commons.lang3.tuple.ImmutableTriple;
 
-import com.google.common.collect.EvictingQueue;
 import com.hazelcast.cluster.Address;
 
 import java.util.LinkedList;

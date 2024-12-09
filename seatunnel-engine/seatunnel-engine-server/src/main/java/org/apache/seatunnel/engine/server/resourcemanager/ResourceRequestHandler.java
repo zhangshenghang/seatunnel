@@ -18,6 +18,7 @@
 package org.apache.seatunnel.engine.server.resourcemanager;
 
 import org.apache.seatunnel.shade.com.google.common.annotations.VisibleForTesting;
+import org.apache.seatunnel.shade.com.google.common.collect.EvictingQueue;
 
 import org.apache.seatunnel.engine.common.config.server.AllocateStrategy;
 import org.apache.seatunnel.engine.common.runtime.DeployType;
@@ -35,7 +36,6 @@ import org.apache.seatunnel.engine.server.utils.SystemLoadCalculate;
 
 import org.apache.commons.lang3.tuple.ImmutableTriple;
 
-import com.google.common.collect.EvictingQueue;
 import com.hazelcast.cluster.Address;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
