@@ -138,10 +138,6 @@ public class OracleCDCIT extends AbstractOracleCDCIT implements TestResource {
     }
 
     @TestTemplate
-    @DisabledOnContainer(
-            value = {},
-            type = {EngineType.SPARK, EngineType.FLINK},
-            disabledReason = "Currently SPARK do not support cdc")
     public void testOracleCdcCheckDataE2e(TestContainer container) throws Exception {
         checkDataForTheJob(container, "/oraclecdc_to_oracle.conf", false);
     }
@@ -165,7 +161,6 @@ public class OracleCDCIT extends AbstractOracleCDCIT implements TestResource {
         clearTable(SCEHMA_NAME, SINK_TABLE2);
 
         insertSourceTable(SCEHMA_NAME, SOURCE_TABLE1);
-        insertSourceTable(SCEHMA_NAME, "PARTITION_SOURCE_TABLE");
 
         if (skipAnalysis) {
             // analyzeTable before execute job
