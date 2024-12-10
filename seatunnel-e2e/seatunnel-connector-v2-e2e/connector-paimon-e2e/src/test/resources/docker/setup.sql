@@ -15,22 +15,21 @@
 -- limitations under the License.
 --
 
--- ----------------------------------------------------------------------------------------------------------------
--- DATABASE:  shop
--- ----------------------------------------------------------------------------------------------------------------
-CREATE DATABASE IF NOT EXISTS `shop`;
-use shop;
+-- In production you would almost certainly limit the replication user must be on the follower (slave) machine,
+-- to prevent other clients accessing the log from other machines. For example, 'replicator'@'follower.acme.com'.
+-- However, in this database we'll grant 2 users different privileges:
+--
+-- 1) 'mysqluser' - all privileges
+-- 2) 'st_user_source' - all privileges required by the snapshot reader AND binlog reader (used for testing)
+-- 3) 'st_user_sink' - all privileges required by the write data (used for testing)
+--
+GRANT ALL PRIVILEGES ON *.* TO 'mysqluser'@'%';
 
-
-alter table products drop column add_column1,drop column add_column3;
-insert into products
-values (146,"scooter","Small 2-wheel scooter",3.14,1),
-       (147,"car battery","12V car battery",8.1,2),
-       (148,"12-pack drill bits","12-pack of drill bits with sizes ranging from #40 to #3",0.8,3),
-       (149,"hammer","12oz carpenter's hammer",0.75,4),
-       (150,"hammer","14oz carpenter's hammer",0.875,5),
-       (151,"hammer","16oz carpenter's hammer",1.0,6),
-       (152,"rocks","box of assorted rocks",5.3,7),
-       (153,"jacket","water resistent black wind breaker",0.1,8),
-       (154,"spare tire","24 inch spare tire",22.2,9);
-update products set name = 'dailai' where id > 143;
+CREATE USER 'st_user_source' IDENTIFIED BY 'mysqlpw';
+GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT, DROP, LOCK TABLES  ON *.* TO 'st_user_source'@'%';
+CREATE USER 'st_user_sink' IDENTIFIED BY 'mysqlpw';
+GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, INDEX, ALTER ON *.* TO 'st_user_sink'@'%';
+-- ----------------------------------------------------------------------------------------------------------------
+-- DATABASE:  emptydb
+-- ----------------------------------------------------------------------------------------------------------------
+CREATE DATABASE emptydb;
