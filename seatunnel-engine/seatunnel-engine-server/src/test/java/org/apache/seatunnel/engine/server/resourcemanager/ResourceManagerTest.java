@@ -19,6 +19,7 @@ package org.apache.seatunnel.engine.server.resourcemanager;
 
 import org.apache.seatunnel.engine.common.config.server.AllocateStrategy;
 import org.apache.seatunnel.engine.server.AbstractSeaTunnelServerTest;
+import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.RandomStrategy;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.CPU;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.Memory;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
@@ -206,7 +207,7 @@ public class ResourceManagerTest extends AbstractSeaTunnelServerTest<ResourceMan
                                 resourceProfiles,
                                 registerWorker,
                                 (AbstractResourceManager) this.resourceManager,
-                                null)
+                                new RandomStrategy())
                         .preCheckWorkerResource(new ResourceProfile());
         Assertions.assertEquals(result.isPresent(), dynamicSlot);
     }

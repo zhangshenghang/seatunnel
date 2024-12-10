@@ -22,6 +22,8 @@ import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.commons.lang3.tuple.ImmutableTriple;
 
 import com.hazelcast.cluster.Address;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.util.Comparator;
 import java.util.List;
@@ -31,17 +33,11 @@ import java.util.Optional;
 /** SlotRatioStrategy is a strategy that selects the worker with the lowest slot usage rate. */
 public class SlotRatioStrategy implements SlotAllocationStrategy {
 
-    private final Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
-
-    public SlotRatioStrategy(
-            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
-        this.workerAssignedSlots = workerAssignedSlots;
-    }
+    @Getter @Setter
+    private Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
 
     @Override
-    public Optional<WorkerProfile> selectWorker(
-            List<WorkerProfile> availableWorkers,
-            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
+    public Optional<WorkerProfile> selectWorker(List<WorkerProfile> availableWorkers) {
 
         Optional<WorkerProfile> workerProfile =
                 availableWorkers.stream().min(Comparator.comparingDouble(this::calculateSlotUsage));

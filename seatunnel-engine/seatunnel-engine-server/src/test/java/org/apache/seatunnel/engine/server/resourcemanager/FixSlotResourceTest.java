@@ -28,7 +28,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -52,8 +51,8 @@ public class FixSlotResourceTest extends AbstractSeaTunnelServerTest<FixSlotReso
     @Test
     public void testEnoughResource() throws ExecutionException, InterruptedException {
         ResourceManager resourceManager = server.getCoordinatorService().getResourceManager();
-        ((AbstractResourceManager) resourceManager)
-                .setWorkerAssignedSlots(new ConcurrentHashMap<>());
+        //        ((AbstractResourceManager) resourceManager)
+        //                .setWorkerAssignedSlots(new ConcurrentHashMap<>());
         // wait all slot ready
         await().atMost(20000, TimeUnit.MILLISECONDS)
                 .untilAsserted(
@@ -75,8 +74,6 @@ public class FixSlotResourceTest extends AbstractSeaTunnelServerTest<FixSlotReso
     @Test
     public void testNotEnoughResource() throws ExecutionException, InterruptedException {
         ResourceManager resourceManager = server.getCoordinatorService().getResourceManager();
-        ((AbstractResourceManager) resourceManager)
-                .setWorkerAssignedSlots(new ConcurrentHashMap<>());
         long jobId = System.currentTimeMillis();
         List<ResourceProfile> resourceProfiles = new ArrayList<>();
         resourceProfiles.add(new ResourceProfile());

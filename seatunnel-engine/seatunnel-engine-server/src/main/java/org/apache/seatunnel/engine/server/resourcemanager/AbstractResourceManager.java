@@ -17,16 +17,17 @@
 
 package org.apache.seatunnel.engine.server.resourcemanager;
 
-import org.apache.seatunnel.shade.com.google.common.collect.EvictingQueue;
-
 import org.apache.seatunnel.engine.common.config.EngineConfig;
 import org.apache.seatunnel.engine.common.runtime.ExecutionMode;
+import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.RandomStrategy;
+import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.SlotAllocationStrategy;
+import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.SlotRatioStrategy;
+import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.SystemLoadStrategy;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.ReleaseSlotOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.ResetResourceOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.SyncWorkerProfileOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
-import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.utils.NodeEngineUtil;
 
@@ -67,17 +68,29 @@ public abstract class AbstractResourceManager implements ResourceManager {
 
     private volatile boolean isRunning = true;
 
-    private Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap;
-
     @Setter @Getter
     private Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
+
+    @Getter private final SlotAllocationStrategy slotAllocationStrategy;
 
     public AbstractResourceManager(NodeEngine nodeEngine, EngineConfig engineConfig) {
         this.registerWorker = new ConcurrentHashMap<>();
         this.nodeEngine = nodeEngine;
         this.engineConfig = engineConfig;
         this.mode = engineConfig.getMode();
-        this.workerLoadMap = new ConcurrentHashMap<>();
+
+        switch (engineConfig.getSlotServiceConfig().getAllocateStrategy()) {
+            case SYSTEM_LOAD:
+                this.slotAllocationStrategy = new SystemLoadStrategy(new ConcurrentHashMap<>());
+                break;
+            case SLOT_RATIO:
+                this.slotAllocationStrategy = new SlotRatioStrategy();
+                break;
+            case RANDOM:
+            default:
+                this.slotAllocationStrategy = new RandomStrategy();
+                break;
+        }
     }
 
     @Override
@@ -167,7 +180,7 @@ public abstract class AbstractResourceManager implements ResourceManager {
             throw new NoEnoughResourceException();
         }
         return new ResourceRequestHandler(
-                        jobId, resourceProfile, matchedWorker, this, workerLoadMap)
+                        jobId, resourceProfile, matchedWorker, this, slotAllocationStrategy)
                 .request(tagFilter);
     }
 
@@ -255,10 +268,12 @@ public abstract class AbstractResourceManager implements ResourceManager {
             log.debug("received worker heartbeat from: " + workerProfile.getAddress());
         }
         registerWorker.put(workerProfile.getAddress(), workerProfile);
-        if (Objects.nonNull(workerProfile.getSystemLoadInfo())) {
-            workerLoadMap
-                    .computeIfAbsent(workerProfile.getAddress(), k -> EvictingQueue.create(5))
-                    .offer(workerProfile.getSystemLoadInfo());
+
+        if (slotAllocationStrategy instanceof SystemLoadStrategy
+                && Objects.nonNull(workerProfile.getSystemLoadInfo())) {
+            ((SystemLoadStrategy) slotAllocationStrategy)
+                    .updateWorkerLoad(
+                            workerProfile.getAddress(), workerProfile.getSystemLoadInfo());
         }
     }
 

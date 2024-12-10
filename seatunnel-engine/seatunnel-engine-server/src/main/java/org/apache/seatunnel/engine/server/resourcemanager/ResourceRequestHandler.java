@@ -18,22 +18,15 @@
 package org.apache.seatunnel.engine.server.resourcemanager;
 
 import org.apache.seatunnel.shade.com.google.common.annotations.VisibleForTesting;
-import org.apache.seatunnel.shade.com.google.common.collect.EvictingQueue;
 
 import org.apache.seatunnel.engine.common.config.server.AllocateStrategy;
 import org.apache.seatunnel.engine.common.runtime.DeployType;
-import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.RandomStrategy;
 import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.SlotAllocationStrategy;
-import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.SlotRatioStrategy;
-import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.SystemLoadStrategy;
 import org.apache.seatunnel.engine.server.resourcemanager.opeartion.RequestSlotOperation;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
-import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.service.slot.SlotAndWorkerProfile;
-
-import org.apache.commons.lang3.tuple.ImmutableTriple;
 
 import com.hazelcast.cluster.Address;
 import com.hazelcast.logging.ILogger;
@@ -76,18 +69,20 @@ public class ResourceRequestHandler {
     private final AllocateStrategy allocateStrategy;
 
     // The load of each worker node
-    private final Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap;
+    //    private final Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap;
 
     // ImmutableTriple <the estimated resource usage ratio of a single node, the number of slot
     // applications, and the number of records before resource application>
-    private final Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
+    //    private final Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
+
+    private final SlotAllocationStrategy slotAllocationStrategy;
 
     public ResourceRequestHandler(
             long jobId,
             List<ResourceProfile> resourceProfile,
             ConcurrentMap<Address, WorkerProfile> registerWorker,
             AbstractResourceManager resourceManager,
-            Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap) {
+            SlotAllocationStrategy slotAllocationStrategy) {
         this.completableFuture = new CompletableFuture<>();
         this.resultSlotProfiles = new ConcurrentHashMap<>();
         this.jobId = jobId;
@@ -96,8 +91,7 @@ public class ResourceRequestHandler {
         this.resourceManager = resourceManager;
         this.allocateStrategy =
                 resourceManager.getEngineConfig().getSlotServiceConfig().getAllocateStrategy();
-        this.workerLoadMap = workerLoadMap;
-        this.workerAssignedSlots = resourceManager.getWorkerAssignedSlots();
+        this.slotAllocationStrategy = slotAllocationStrategy;
     }
 
     public CompletableFuture<List<SlotProfile>> request(Map<String, String> tags) {
@@ -247,22 +241,8 @@ public class ResourceRequestHandler {
                                                                         .enoughThan(r)))
                         .collect(Collectors.toList());
 
-        SlotAllocationStrategy strategy;
-        switch (allocateStrategy) {
-            case SYSTEM_LOAD:
-                strategy = new SystemLoadStrategy(workerLoadMap);
-                break;
-            case SLOT_RATIO:
-                strategy = new SlotRatioStrategy(workerAssignedSlots);
-                break;
-            case RANDOM:
-            default:
-                strategy = new RandomStrategy();
-                break;
-        }
-
         Optional<WorkerProfile> workerProfile =
-                strategy.selectWorker(availableWorkers, workerAssignedSlots);
+                slotAllocationStrategy.selectWorker(availableWorkers);
 
         if (!workerProfile.isPresent()) {
             // Check if there are still unassigned resources

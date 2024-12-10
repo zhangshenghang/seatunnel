@@ -26,6 +26,8 @@ import org.apache.seatunnel.engine.server.utils.SystemLoadCalculate;
 import org.apache.commons.lang3.tuple.ImmutableTriple;
 
 import com.hazelcast.cluster.Address;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.util.Comparator;
 import java.util.List;
@@ -36,14 +38,19 @@ import java.util.Optional;
 public class SystemLoadStrategy implements SlotAllocationStrategy {
     private final Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap;
 
+    @Getter @Setter
+    private Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
+
     public SystemLoadStrategy(Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap) {
         this.workerLoadMap = workerLoadMap;
     }
 
+    public void updateWorkerLoad(Address address, SystemLoadInfo systemLoadInfo) {
+        workerLoadMap.computeIfAbsent(address, k -> EvictingQueue.create(5)).add(systemLoadInfo);
+    }
+
     @Override
-    public Optional<WorkerProfile> selectWorker(
-            List<WorkerProfile> availableWorkers,
-            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
+    public Optional<WorkerProfile> selectWorker(List<WorkerProfile> availableWorkers) {
         Optional<WorkerProfile> workerProfile =
                 availableWorkers.stream()
                         .max(
