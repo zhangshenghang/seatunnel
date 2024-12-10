@@ -68,13 +68,6 @@ public class ResourceRequestHandler {
 
     private final AllocateStrategy allocateStrategy;
 
-    // The load of each worker node
-    //    private final Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap;
-
-    // ImmutableTriple <the estimated resource usage ratio of a single node, the number of slot
-    // applications, and the number of records before resource application>
-    //    private final Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
-
     private final SlotAllocationStrategy slotAllocationStrategy;
 
     public ResourceRequestHandler(

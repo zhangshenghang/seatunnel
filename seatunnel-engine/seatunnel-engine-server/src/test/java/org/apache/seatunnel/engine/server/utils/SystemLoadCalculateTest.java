@@ -25,11 +25,10 @@ import org.apache.seatunnel.engine.common.config.server.SlotServiceConfig;
 import org.apache.seatunnel.engine.server.resourcemanager.AbstractResourceManager;
 import org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy.SystemLoadStrategy;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.ResourceProfile;
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotAssignedProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
-
-import org.apache.commons.lang3.tuple.ImmutableTriple;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -193,8 +192,7 @@ public class SystemLoadCalculateTest {
         when(workerProfile.getAddress()).thenReturn(address);
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[5]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[3]);
-        Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots =
-                new ConcurrentHashMap<>();
+        Map<Address, SlotAssignedProfile> workerAssignedSlots = new ConcurrentHashMap<>();
 
         // Each task has a fixed slot resource
         double singleSlotResource =
@@ -213,7 +211,7 @@ public class SystemLoadCalculateTest {
 
         // The worker has been assigned 1 slot
         times = 1;
-        workerAssignedSlots.put(address, new ImmutableTriple<>(singleSlotResource, 1, 0));
+        workerAssignedSlots.put(address, new SlotAssignedProfile(singleSlotResource, 1, 0));
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[6]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[2]);
         result =
@@ -227,7 +225,7 @@ public class SystemLoadCalculateTest {
 
         // The worker has been assigned 2 slots
         times = 2;
-        workerAssignedSlots.put(address, new ImmutableTriple<>(singleSlotResource, 2, 0));
+        workerAssignedSlots.put(address, new SlotAssignedProfile(singleSlotResource, 2, 0));
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[7]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[1]);
         result =
@@ -276,8 +274,7 @@ public class SystemLoadCalculateTest {
         when(workerProfile.getAddress()).thenReturn(address);
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[5]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[3]);
-        Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots =
-                new ConcurrentHashMap<>();
+        Map<Address, SlotAssignedProfile> workerAssignedSlots = new ConcurrentHashMap<>();
 
         // Each task has a fixed Slot resource
         double singleSlotResource =
@@ -296,7 +293,7 @@ public class SystemLoadCalculateTest {
 
         // The worker has been assigned 1 slot
         times = 1;
-        workerAssignedSlots.put(address, new ImmutableTriple<>(singleSlotResource, 1, 0));
+        workerAssignedSlots.put(address, new SlotAssignedProfile(singleSlotResource, 1, 0));
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[6]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[2]);
         result =
@@ -308,7 +305,7 @@ public class SystemLoadCalculateTest {
                 comprehensiveResourceAvailability - (singleSlotResource * times), result, 0.01);
         Assertions.assertEquals(0.4, result, 0.01);
 
-        workerAssignedSlots.put(address, new ImmutableTriple<>(singleSlotResource, 2, 0));
+        workerAssignedSlots.put(address, new SlotAssignedProfile(singleSlotResource, 2, 0));
         when(workerProfile.getAssignedSlots()).thenReturn(new SlotProfile[7]);
         when(workerProfile.getUnassignedSlots()).thenReturn(new SlotProfile[1]);
         result =
@@ -348,8 +345,7 @@ public class SystemLoadCalculateTest {
         when(workerProfile2.getUnassignedSlots()).thenReturn(new SlotProfile[3]);
         when(workerProfile2.getAddress()).thenReturn(address);
 
-        Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots2 =
-                new ConcurrentHashMap<>();
+        Map<Address, SlotAssignedProfile> workerAssignedSlots2 = new ConcurrentHashMap<>();
         List<ResourceProfile> resourceProfiles = new ArrayList<>();
         resourceProfiles.add(new ResourceProfile());
         // Mock ResourceManager
@@ -363,12 +359,12 @@ public class SystemLoadCalculateTest {
         SystemLoadStrategy systemLoadStrategy = new SystemLoadStrategy(workerLoadMap);
         systemLoadStrategy.calculateWeight(workerProfile2, workerAssignedSlots2);
         // Mock Application Resources
-        workerAssignedSlots2.put(address, new ImmutableTriple<>(singleSlotResource, 1, 5));
+        workerAssignedSlots2.put(address, new SlotAssignedProfile(singleSlotResource, 1, 5));
         when(workerProfile2.getAssignedSlots()).thenReturn(new SlotProfile[6]);
         when(workerProfile2.getUnassignedSlots()).thenReturn(new SlotProfile[2]);
         systemLoadStrategy.calculateWeight(workerProfile2, workerAssignedSlots2);
 
-        workerAssignedSlots2.put(address, new ImmutableTriple<>(singleSlotResource, 2, 5));
+        workerAssignedSlots2.put(address, new SlotAssignedProfile(singleSlotResource, 2, 5));
         when(workerProfile2.getAssignedSlots()).thenReturn(new SlotProfile[7]);
         when(workerProfile2.getUnassignedSlots()).thenReturn(new SlotProfile[1]);
         // Verity
@@ -471,14 +467,12 @@ public class SystemLoadCalculateTest {
         when(workerProfile1.getAddress()).thenReturn(address1);
         // Simulate ResourceRequestHandler to call calculateWeight to calculate weight
         SystemLoadStrategy systemLoadStrategy = new SystemLoadStrategy(workerLoadMap);
-        Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots1 =
-                new ConcurrentHashMap<>();
+        Map<Address, SlotAssignedProfile> workerAssignedSlots1 = new ConcurrentHashMap<>();
         Double calculateWeight1 =
                 systemLoadStrategy.calculateWeight(workerProfile1, workerAssignedSlots1);
         log.info("Node1 initialization weight: {}", calculateWeight1);
 
-        Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots2 =
-                new ConcurrentHashMap<>();
+        Map<Address, SlotAssignedProfile> workerAssignedSlots2 = new ConcurrentHashMap<>();
         Double calculateWeight2 =
                 systemLoadStrategy.calculateWeight(workerProfile2, workerAssignedSlots2);
         log.info("Node2 initialization weight: {}", calculateWeight2);
@@ -493,7 +487,7 @@ public class SystemLoadCalculateTest {
         double singleSlotUseResource = 0.1;
 
         // First node is assigned a slot
-        workerAssignedSlots1.put(address1, new ImmutableTriple<>(singleSlotUseResource, 1, 0));
+        workerAssignedSlots1.put(address1, new SlotAssignedProfile(singleSlotUseResource, 1, 0));
         when(workerProfile1.getAssignedSlots()).thenReturn(new SlotProfile[1]);
         when(workerProfile1.getUnassignedSlots()).thenReturn(new SlotProfile[9]);
         calculateWeight1 = systemLoadStrategy.calculateWeight(workerProfile1, workerAssignedSlots1);
@@ -505,7 +499,7 @@ public class SystemLoadCalculateTest {
         Assertions.assertTrue(calculateWeight1 > calculateWeight2);
 
         // First node is assigned two slots
-        workerAssignedSlots1.put(address1, new ImmutableTriple<>(singleSlotUseResource, 2, 0));
+        workerAssignedSlots1.put(address1, new SlotAssignedProfile(singleSlotUseResource, 2, 0));
         when(workerProfile1.getAssignedSlots()).thenReturn(new SlotProfile[2]);
         when(workerProfile1.getUnassignedSlots()).thenReturn(new SlotProfile[8]);
         calculateWeight1 = systemLoadStrategy.calculateWeight(workerProfile1, workerAssignedSlots1);
@@ -517,7 +511,7 @@ public class SystemLoadCalculateTest {
         Assertions.assertTrue(calculateWeight1 > calculateWeight2);
 
         // First node is assigned three slots
-        workerAssignedSlots1.put(address1, new ImmutableTriple<>(singleSlotUseResource, 3, 0));
+        workerAssignedSlots1.put(address1, new SlotAssignedProfile(singleSlotUseResource, 3, 0));
         when(workerProfile1.getAssignedSlots()).thenReturn(new SlotProfile[3]);
         when(workerProfile1.getUnassignedSlots()).thenReturn(new SlotProfile[7]);
         calculateWeight1 = systemLoadStrategy.calculateWeight(workerProfile1, workerAssignedSlots1);
@@ -529,7 +523,7 @@ public class SystemLoadCalculateTest {
         Assertions.assertTrue(calculateWeight1 > calculateWeight2);
 
         // First node is assigned four slots
-        workerAssignedSlots1.put(address1, new ImmutableTriple<>(singleSlotUseResource, 4, 0));
+        workerAssignedSlots1.put(address1, new SlotAssignedProfile(singleSlotUseResource, 4, 0));
         when(workerProfile1.getAssignedSlots()).thenReturn(new SlotProfile[4]);
         when(workerProfile1.getUnassignedSlots()).thenReturn(new SlotProfile[6]);
         calculateWeight1 = systemLoadStrategy.calculateWeight(workerProfile1, workerAssignedSlots1);
@@ -544,7 +538,7 @@ public class SystemLoadCalculateTest {
         Assertions.assertTrue(calculateWeight1 < calculateWeight2);
 
         // Second node is assigned one slot
-        workerAssignedSlots2.put(address2, new ImmutableTriple<>(singleSlotUseResource, 1, 0));
+        workerAssignedSlots2.put(address2, new SlotAssignedProfile(singleSlotUseResource, 1, 0));
         when(workerProfile1.getAssignedSlots()).thenReturn(new SlotProfile[1]);
         when(workerProfile1.getUnassignedSlots()).thenReturn(new SlotProfile[9]);
         calculateWeight1 = systemLoadStrategy.calculateWeight(workerProfile1, workerAssignedSlots1);

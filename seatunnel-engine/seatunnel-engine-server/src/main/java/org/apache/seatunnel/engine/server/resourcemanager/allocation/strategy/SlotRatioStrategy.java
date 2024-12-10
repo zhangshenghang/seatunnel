@@ -17,9 +17,8 @@
 
 package org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy;
 
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotAssignedProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
-
-import org.apache.commons.lang3.tuple.ImmutableTriple;
 
 import com.hazelcast.cluster.Address;
 import lombok.Getter;
@@ -33,8 +32,7 @@ import java.util.Optional;
 /** SlotRatioStrategy is a strategy that selects the worker with the lowest slot usage rate. */
 public class SlotRatioStrategy implements SlotAllocationStrategy {
 
-    @Getter @Setter
-    private Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
+    @Getter @Setter private Map<Address, SlotAssignedProfile> workerAssignedSlots;
 
     @Override
     public Optional<WorkerProfile> selectWorker(List<WorkerProfile> availableWorkers) {
@@ -45,9 +43,12 @@ public class SlotRatioStrategy implements SlotAllocationStrategy {
                 profile -> {
                     workerAssignedSlots.merge(
                             profile.getAddress(),
-                            new ImmutableTriple<>(0.0, 1, profile.getAssignedSlots().length),
+                            new SlotAssignedProfile(0.0, 1, profile.getAssignedSlots().length),
                             (oldVal, newVal) ->
-                                    new ImmutableTriple<>(0.0, oldVal.middle + 1, oldVal.right));
+                                    new SlotAssignedProfile(
+                                            0.0,
+                                            oldVal.getCurrentTaskAssignedSlotsNum() + 1,
+                                            oldVal.getAssignedSlotsNum()));
                 });
         return workerProfile;
     }
@@ -59,19 +60,20 @@ public class SlotRatioStrategy implements SlotAllocationStrategy {
      * @return slot usage rate, range 0.0-1.0
      */
     private double calculateSlotUsage(WorkerProfile worker) {
-        ImmutableTriple<Double, Integer, Integer> immutableTriple =
-                workerAssignedSlots.get(worker.getAddress());
+        SlotAssignedProfile slotAssignedProfile = workerAssignedSlots.get(worker.getAddress());
         // If we manually record the number of assigned slots, we use that number, since
         // worker.getAssignedSlots is not updated in real time.
         int assignedSlots =
-                (immutableTriple != null)
-                        ? immutableTriple.middle
+                (slotAssignedProfile != null)
+                        ? slotAssignedProfile.getCurrentTaskAssignedSlotsNum()
                         : worker.getAssignedSlots().length;
-        workerAssignedSlots.put(worker.getAddress(), new ImmutableTriple<>(0.0, assignedSlots, 0));
+        workerAssignedSlots.put(
+                worker.getAddress(), new SlotAssignedProfile(0.0, assignedSlots, 0));
 
         int totalSlots = worker.getUnassignedSlots().length + worker.getAssignedSlots().length;
         if (totalSlots == 0) {
-            return 1.0;
+            // When using dynamic slots, the default usage rate is 50%
+            return 0.5;
         }
 
         return (double) assignedSlots / totalSlots;

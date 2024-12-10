@@ -169,6 +169,7 @@ public class SystemLoadAllocateStrategyIT {
                                 Assertions.assertEquals(
                                         10, node1AssignedSlotsNum + node2AssignedSlotsNum);
                             });
+            log.info("The first step is completed");
 
             // Waiting to collect the node's System Load information
             Thread.sleep(60000);
@@ -177,6 +178,7 @@ public class SystemLoadAllocateStrategyIT {
             jobConfig = new JobConfig();
             jobConfig.setName(testCaseName);
 
+            log.info("Start a task that occupies 4 slots");
             engineClient
                     .createExecutionContext(
                             createTestResources(
@@ -205,6 +207,7 @@ public class SystemLoadAllocateStrategyIT {
                                 Assertions.assertEquals(7, node1AssignedSlotsNum);
                                 Assertions.assertEquals(7, node2AssignedSlotsNum);
                             });
+            log.info("The second step is completed");
 
         } finally {
             if (engineClient != null) {

@@ -19,10 +19,9 @@ package org.apache.seatunnel.engine.server.utils;
 
 import org.apache.seatunnel.shade.com.google.common.collect.EvictingQueue;
 
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotAssignedProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
-
-import org.apache.commons.lang3.tuple.ImmutableTriple;
 
 import com.hazelcast.cluster.Address;
 
@@ -123,7 +122,7 @@ public class SystemLoadCalculate {
     public double calculate(
             EvictingQueue<SystemLoadInfo> systemLoads,
             WorkerProfile workerProfile,
-            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
+            Map<Address, SlotAssignedProfile> workerAssignedSlots) {
         if (Objects.isNull(systemLoads) || systemLoads.isEmpty()) {
             // If the node load is not obtained, zero is returned. This only happens when the
             // service is just started and the load status has not yet been obtained.
@@ -164,13 +163,13 @@ public class SystemLoadCalculate {
     public double calculateComprehensiveResourceAvailability(
             double comprehensiveResourceAvailability,
             WorkerProfile workerProfile,
-            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
+            Map<Address, SlotAssignedProfile> workerAssignedSlots) {
         // Start step 4
         // Number of assigned slots
         int assignedSlotsNum = workerProfile.getAssignedSlots().length;
         // Resource usage per slot, default is 0.1
         double singleSlotUseResource = 0.1;
-        ImmutableTriple<Double, Integer, Integer> tuple2 = null;
+        SlotAssignedProfile slotAssignedProfile;
         if (workerAssignedSlots.get(workerProfile.getAddress()) == null) {
             if (assignedSlotsNum != 0) {
                 singleSlotUseResource =
@@ -180,16 +179,16 @@ public class SystemLoadCalculate {
                                                 * 100.0)
                                 / 100.0;
             }
-            tuple2 =
+            slotAssignedProfile =
                     workerAssignedSlots.getOrDefault(
                             workerProfile.getAddress(),
-                            new ImmutableTriple<>(singleSlotUseResource, 0, assignedSlotsNum));
+                            new SlotAssignedProfile(singleSlotUseResource, 0, assignedSlotsNum));
         } else {
-            tuple2 = workerAssignedSlots.get(workerProfile.getAddress());
-            singleSlotUseResource = tuple2.left;
+            slotAssignedProfile = workerAssignedSlots.get(workerProfile.getAddress());
+            singleSlotUseResource = slotAssignedProfile.getSingleSlotUseResource();
         }
 
-        Integer assignedTimesForTask = tuple2.middle;
+        Integer assignedTimesForTask = slotAssignedProfile.getCurrentTaskAssignedSlotsNum();
         // Calculate the weight of the current task on the Worker node, step 4 completed
         comprehensiveResourceAvailability =
                 comprehensiveResourceAvailability - (assignedTimesForTask * singleSlotUseResource);
@@ -197,12 +196,14 @@ public class SystemLoadCalculate {
     }
 
     public double balanceFactor(
-            WorkerProfile workerProfile,
-            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
-        ImmutableTriple<Double, Integer, Integer> tuple2 =
+            WorkerProfile workerProfile, Map<Address, SlotAssignedProfile> workerAssignedSlots) {
+        SlotAssignedProfile slotAssignedProfile =
                 workerAssignedSlots.get(workerProfile.getAddress());
-        if (tuple2 != null) {
-            return balanceFactor(workerProfile, tuple2.middle + tuple2.right);
+        if (slotAssignedProfile != null) {
+            return balanceFactor(
+                    workerProfile,
+                    slotAssignedProfile.getCurrentTaskAssignedSlotsNum()
+                            + slotAssignedProfile.getAssignedSlotsNum());
         } else {
             return balanceFactor(workerProfile, workerProfile.getAssignedSlots().length);
         }

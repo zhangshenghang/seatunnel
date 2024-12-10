@@ -19,11 +19,10 @@ package org.apache.seatunnel.engine.server.resourcemanager.allocation.strategy;
 
 import org.apache.seatunnel.shade.com.google.common.collect.EvictingQueue;
 
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotAssignedProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SystemLoadInfo;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.utils.SystemLoadCalculate;
-
-import org.apache.commons.lang3.tuple.ImmutableTriple;
 
 import com.hazelcast.cluster.Address;
 import lombok.Getter;
@@ -33,16 +32,20 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** SystemLoadStrategy is a strategy that selects the worker with the lowest system load. */
 public class SystemLoadStrategy implements SlotAllocationStrategy {
     private final Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap;
 
-    @Getter @Setter
-    private Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
+    @Getter @Setter private Map<Address, SlotAssignedProfile> workerAssignedSlots;
 
     public SystemLoadStrategy(Map<Address, EvictingQueue<SystemLoadInfo>> workerLoadMap) {
         this.workerLoadMap = workerLoadMap;
+    }
+
+    public SystemLoadStrategy() {
+        this.workerLoadMap = new ConcurrentHashMap<>();
     }
 
     public void updateWorkerLoad(Address address, SystemLoadInfo systemLoadInfo) {
@@ -61,17 +64,18 @@ public class SystemLoadStrategy implements SlotAllocationStrategy {
                 profile -> {
                     workerAssignedSlots.merge(
                             profile.getAddress(),
-                            new ImmutableTriple<>(0.0, 1, profile.getAssignedSlots().length),
+                            new SlotAssignedProfile(0.0, 1, profile.getAssignedSlots().length),
                             (oldVal, newVal) ->
-                                    new ImmutableTriple<>(
-                                            oldVal.left, oldVal.middle + 1, oldVal.right));
+                                    new SlotAssignedProfile(
+                                            oldVal.getSingleSlotUseResource(),
+                                            oldVal.getCurrentTaskAssignedSlotsNum() + 1,
+                                            oldVal.getAssignedSlotsNum()));
                 });
         return workerProfile;
     }
 
     public Double calculateWeight(
-            WorkerProfile workerProfile,
-            Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots) {
+            WorkerProfile workerProfile, Map<Address, SlotAssignedProfile> workerAssignedSlots) {
         SystemLoadCalculate systemLoadCalculate = new SystemLoadCalculate();
         return systemLoadCalculate.calculate(
                 workerLoadMap.get(workerProfile.getAddress()), workerProfile, workerAssignedSlots);

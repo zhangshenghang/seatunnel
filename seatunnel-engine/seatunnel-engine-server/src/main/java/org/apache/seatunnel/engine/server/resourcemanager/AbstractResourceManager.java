@@ -31,15 +31,12 @@ import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
 import org.apache.seatunnel.engine.server.resourcemanager.worker.WorkerProfile;
 import org.apache.seatunnel.engine.server.utils.NodeEngineUtil;
 
-import org.apache.commons.lang3.tuple.ImmutableTriple;
-
 import com.hazelcast.cluster.Address;
 import com.hazelcast.cluster.Member;
 import com.hazelcast.internal.services.MembershipServiceEvent;
 import com.hazelcast.spi.impl.NodeEngine;
 import com.hazelcast.spi.impl.operationservice.Operation;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -68,9 +65,6 @@ public abstract class AbstractResourceManager implements ResourceManager {
 
     private volatile boolean isRunning = true;
 
-    @Setter @Getter
-    private Map<Address, ImmutableTriple<Double, Integer, Integer>> workerAssignedSlots;
-
     @Getter private final SlotAllocationStrategy slotAllocationStrategy;
 
     public AbstractResourceManager(NodeEngine nodeEngine, EngineConfig engineConfig) {
@@ -81,7 +75,7 @@ public abstract class AbstractResourceManager implements ResourceManager {
 
         switch (engineConfig.getSlotServiceConfig().getAllocateStrategy()) {
             case SYSTEM_LOAD:
-                this.slotAllocationStrategy = new SystemLoadStrategy(new ConcurrentHashMap<>());
+                this.slotAllocationStrategy = new SystemLoadStrategy();
                 break;
             case SLOT_RATIO:
                 this.slotAllocationStrategy = new SlotRatioStrategy();
