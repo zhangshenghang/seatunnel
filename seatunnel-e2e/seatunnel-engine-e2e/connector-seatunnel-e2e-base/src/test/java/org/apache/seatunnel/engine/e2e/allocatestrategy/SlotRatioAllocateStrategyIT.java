@@ -21,6 +21,7 @@ import org.apache.seatunnel.common.config.Common;
 import org.apache.seatunnel.common.config.DeployMode;
 import org.apache.seatunnel.common.constants.JobMode;
 import org.apache.seatunnel.engine.client.SeaTunnelClient;
+import org.apache.seatunnel.engine.client.job.ClientJobProxy;
 import org.apache.seatunnel.engine.common.config.ConfigProvider;
 import org.apache.seatunnel.engine.common.config.JobConfig;
 import org.apache.seatunnel.engine.common.config.SeaTunnelConfig;
@@ -119,17 +120,18 @@ public class SlotRatioAllocateStrategyIT {
             clientConfig.setClusterName(TestUtils.getClusterName(testClusterName));
             engineClient = new SeaTunnelClient(clientConfig);
             // Start a task
-            engineClient
-                    .createExecutionContext(
-                            createTestResources(
-                                    testCaseName,
-                                    JobMode.STREAMING,
-                                    testRowNumber,
-                                    4,
-                                    "allocate-strategy/allocate_strategy_with_slot_ratio.conf"),
-                            jobConfig,
-                            seaTunnelConfig)
-                    .execute();
+            ClientJobProxy clientJobProxyStepOne =
+                    engineClient
+                            .createExecutionContext(
+                                    createTestResources(
+                                            testCaseName,
+                                            JobMode.STREAMING,
+                                            testRowNumber,
+                                            4,
+                                            "allocate-strategy/allocate_strategy_with_slot_ratio.conf"),
+                                    jobConfig,
+                                    seaTunnelConfig)
+                            .execute();
 
             NodeEngineImpl nodeEngine = node1.node.nodeEngine;
             Address node2Address = node2.node.address;
@@ -161,17 +163,18 @@ public class SlotRatioAllocateStrategyIT {
 
             // Start a task with 6 parallelism, which will occupy 7 slots in total, and the
             // SLOT_RATION strategy will be evenly distributed to two nodes
-            engineClient
-                    .createExecutionContext(
-                            createTestResources(
-                                    testCaseName,
-                                    JobMode.STREAMING,
-                                    testRowNumber,
-                                    6,
-                                    "allocate-strategy/allocate_strategy_with_slot_ratio.conf"),
-                            jobConfig,
-                            seaTunnelConfig)
-                    .execute();
+            ClientJobProxy clientJobProxyStepTwo =
+                    engineClient
+                            .createExecutionContext(
+                                    createTestResources(
+                                            testCaseName,
+                                            JobMode.STREAMING,
+                                            testRowNumber,
+                                            6,
+                                            "allocate-strategy/allocate_strategy_with_slot_ratio.conf"),
+                                    jobConfig,
+                                    seaTunnelConfig)
+                            .execute();
 
             // The task will eventually occupy 7 slots. Together with the first task, it will occupy
             // a total of 12 slots. The SLOT_RATION strategy will evenly distribute them to the two
@@ -189,6 +192,11 @@ public class SlotRatioAllocateStrategyIT {
                                 Assertions.assertEquals(6, node1AssignedSlotsNum);
                                 Assertions.assertEquals(6, node2AssignedSlotsNum);
                             });
+
+            clientJobProxyStepOne.cancelJob();
+            clientJobProxyStepTwo.cancelJob();
+            clientJobProxyStepOne.waitForJobCompleteV2();
+            clientJobProxyStepTwo.waitForJobCompleteV2();
 
         } finally {
             if (engineClient != null) {

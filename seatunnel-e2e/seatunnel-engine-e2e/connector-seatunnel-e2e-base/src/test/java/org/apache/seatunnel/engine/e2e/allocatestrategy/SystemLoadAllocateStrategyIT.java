@@ -21,6 +21,7 @@ import org.apache.seatunnel.common.config.Common;
 import org.apache.seatunnel.common.config.DeployMode;
 import org.apache.seatunnel.common.constants.JobMode;
 import org.apache.seatunnel.engine.client.SeaTunnelClient;
+import org.apache.seatunnel.engine.client.job.ClientJobProxy;
 import org.apache.seatunnel.engine.common.config.ConfigProvider;
 import org.apache.seatunnel.engine.common.config.JobConfig;
 import org.apache.seatunnel.engine.common.config.SeaTunnelConfig;
@@ -125,29 +126,31 @@ public class SystemLoadAllocateStrategyIT {
             ClientConfig clientConfig = ConfigProvider.locateAndGetClientConfig();
             clientConfig.setClusterName(TestUtils.getClusterName(testClusterName));
             engineClient = new SeaTunnelClient(clientConfig);
-            engineClient
-                    .createExecutionContext(
-                            createTestResources(
-                                    testCaseName,
-                                    JobMode.STREAMING,
-                                    testRowNumber,
-                                    testParallelism,
-                                    "allocate-strategy/allocate_strategy_tag1_with_system_load.conf"),
-                            jobConfig,
-                            seaTunnelConfig)
-                    .execute();
+            ClientJobProxy clientJobProxyStepOne1 =
+                    engineClient
+                            .createExecutionContext(
+                                    createTestResources(
+                                            testCaseName,
+                                            JobMode.STREAMING,
+                                            testRowNumber,
+                                            testParallelism,
+                                            "allocate-strategy/allocate_strategy_tag1_with_system_load.conf"),
+                                    jobConfig,
+                                    seaTunnelConfig)
+                            .execute();
 
-            engineClient
-                    .createExecutionContext(
-                            createTestResources(
-                                    testCaseName,
-                                    JobMode.STREAMING,
-                                    testRowNumber,
-                                    testParallelism,
-                                    "allocate-strategy/allocate_strategy_tag2_with_system_load.conf"),
-                            jobConfig,
-                            seaTunnelConfig)
-                    .execute();
+            ClientJobProxy clientJobProxyStepOne2 =
+                    engineClient
+                            .createExecutionContext(
+                                    createTestResources(
+                                            testCaseName,
+                                            JobMode.STREAMING,
+                                            testRowNumber,
+                                            testParallelism,
+                                            "allocate-strategy/allocate_strategy_tag2_with_system_load.conf"),
+                                    jobConfig,
+                                    seaTunnelConfig)
+                            .execute();
 
             NodeEngineImpl nodeEngine = node1.node.nodeEngine;
             Address node2Address = node2.node.address;
@@ -181,17 +184,18 @@ public class SystemLoadAllocateStrategyIT {
             jobConfig.setName(testCaseName);
 
             log.info("Start a task that occupies 4 slots");
-            engineClient
-                    .createExecutionContext(
-                            createTestResources(
-                                    testCaseName,
-                                    JobMode.STREAMING,
-                                    testRowNumber,
-                                    3,
-                                    "allocate-strategy/allocate_strategy_no_tag_with_system_load.conf"),
-                            jobConfig,
-                            seaTunnelConfig)
-                    .execute();
+            ClientJobProxy clientJobProxyStepTwo =
+                    engineClient
+                            .createExecutionContext(
+                                    createTestResources(
+                                            testCaseName,
+                                            JobMode.STREAMING,
+                                            testRowNumber,
+                                            3,
+                                            "allocate-strategy/allocate_strategy_no_tag_with_system_load.conf"),
+                                    jobConfig,
+                                    seaTunnelConfig)
+                            .execute();
 
             // Because e2e runs on the same node, the CPU and memory are almost the same, but we
             // introduced a balance factor (step 5). So the final result should also be balanced.
@@ -210,6 +214,14 @@ public class SystemLoadAllocateStrategyIT {
                                 Assertions.assertEquals(7, node2AssignedSlotsNum);
                             });
             log.info("The second step is completed");
+
+            clientJobProxyStepOne1.cancelJob();
+            clientJobProxyStepOne2.cancelJob();
+            ;
+            clientJobProxyStepTwo.cancelJob();
+            clientJobProxyStepOne1.waitForJobCompleteV2();
+            clientJobProxyStepOne2.waitForJobCompleteV2();
+            clientJobProxyStepTwo.waitForJobCompleteV2();
 
         } finally {
             if (engineClient != null) {
