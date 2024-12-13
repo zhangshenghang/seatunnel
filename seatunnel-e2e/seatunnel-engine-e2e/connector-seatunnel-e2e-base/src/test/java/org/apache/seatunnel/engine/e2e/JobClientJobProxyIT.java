@@ -48,7 +48,8 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
         Assertions.assertTrue(
                 server.getLogs()
                         .contains(
-                                "Restore time 1, pipeline Job stream_fake_to_inmemory_with_error_retry_1.conf"));
+                                "Restore time 1, pipeline Job stream_fake_to_inmemory_with_error_retry_1.conf"),
+                execResult.getStdout() + "\t" + execResult.getStderr());
         Assertions.assertFalse(
                 server.getLogs()
                         .contains(
@@ -77,7 +78,9 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
         Container.ExecResult execResult =
                 executeJob(server, "/stream_fake_to_inmemory_with_throwable_error.conf");
         Assertions.assertNotEquals(0, execResult.getExitCode());
-        Assertions.assertTrue(execResult.getStderr().contains("table fake sink throw error"));
+        Assertions.assertTrue(
+                execResult.getStderr().contains("table fake sink throw error"),
+                execResult.getStderr());
     }
 
     @Test
@@ -102,7 +105,7 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
 
         // restore will not execute savemode
         execResult = restoreJob(server, "/savemode/fake_to_inmemory_savemode.conf", "1");
-        Assertions.assertEquals(0, execResult.getExitCode());
+        Assertions.assertEquals(0, execResult.getExitCode(), execResult.getStderr());
         // clear old logs
         serverLogLength += serverLogs.length();
         serverLogs = server.getLogs().substring(serverLogLength);

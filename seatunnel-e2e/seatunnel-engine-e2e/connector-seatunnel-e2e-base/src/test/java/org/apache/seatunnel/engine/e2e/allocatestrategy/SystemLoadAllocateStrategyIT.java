@@ -217,7 +217,6 @@ public class SystemLoadAllocateStrategyIT {
 
             clientJobProxyStepOne1.cancelJob();
             clientJobProxyStepOne2.cancelJob();
-            ;
             clientJobProxyStepTwo.cancelJob();
             clientJobProxyStepOne1.waitForJobCompleteV2();
             clientJobProxyStepOne2.waitForJobCompleteV2();
