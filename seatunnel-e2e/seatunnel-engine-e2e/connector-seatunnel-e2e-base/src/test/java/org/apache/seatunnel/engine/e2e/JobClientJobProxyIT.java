@@ -42,6 +42,7 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
 
     @Test
     public void testJobRetryTimes() throws IOException, InterruptedException {
+        Thread.sleep(10000);
         Container.ExecResult execResult =
                 executeJob(server, "/retry-times/stream_fake_to_inmemory_with_error_retry_1.conf");
         Assertions.assertNotEquals(0, execResult.getExitCode());
@@ -61,11 +62,13 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
         Assertions.assertTrue(
                 server.getLogs()
                         .contains(
-                                "Restore time 3, pipeline Job stream_fake_to_inmemory_with_error.conf"));
+                                "Restore time 3, pipeline Job stream_fake_to_inmemory_with_error.conf"),
+                server.getLogs());
     }
 
     @Test
     public void testNoDuplicatedReleaseSlot() throws IOException, InterruptedException {
+        Thread.sleep(10000);
         Container.ExecResult execResult =
                 executeJob(server, "/savemode/fake_to_inmemory_savemode.conf");
         Assertions.assertEquals(0, execResult.getExitCode());
@@ -75,9 +78,14 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
 
     @Test
     public void testMultiTableSinkFailedWithThrowable() throws IOException, InterruptedException {
+        Thread.sleep(10000);
         Container.ExecResult execResult =
                 executeJob(server, "/stream_fake_to_inmemory_with_throwable_error.conf");
         Assertions.assertNotEquals(0, execResult.getExitCode());
+        if (!execResult.getStderr().contains("table fake sink throw error")) {
+            System.out.println(execResult.getStderr());
+            System.out.println();
+        }
         Assertions.assertTrue(
                 execResult.getStderr().contains("table fake sink throw error"),
                 execResult.getStderr());
@@ -85,9 +93,14 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
 
     @Test
     public void testSaveModeOnMasterOrClient() throws IOException, InterruptedException {
+        Thread.sleep(10000);
         Container.ExecResult execResult =
                 executeJob(server, "/savemode/fake_to_inmemory_savemode.conf");
-        Assertions.assertEquals(0, execResult.getExitCode());
+        if (execResult.getExitCode() != 0) {
+            System.out.println(execResult.getStderr());
+            System.out.println();
+        }
+        Assertions.assertEquals(0, execResult.getExitCode(), execResult.getStderr());
         int serverLogLength = 0;
         String serverLogs = server.getLogs();
         Assertions.assertTrue(
@@ -115,6 +128,10 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
         // test savemode on client side
         Container.ExecResult execResult2 =
                 executeJob(server, "/savemode/fake_to_inmemory_savemode_client.conf");
+        if (execResult2.getExitCode() != 0) {
+            System.out.println(server.getLogs());
+            System.out.println();
+        }
         Assertions.assertEquals(0, execResult2.getExitCode());
         // clear old logs
         serverLogLength += serverLogs.length();
@@ -130,6 +147,7 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
 
     @Test
     public void testJobFailedWillThrowException() throws IOException, InterruptedException {
+        Thread.sleep(10000);
         Container.ExecResult execResult = executeSeaTunnelJob("/batch_slot_not_enough.conf");
         Assertions.assertNotEquals(0, execResult.getExitCode());
         Assertions.assertTrue(
