@@ -116,6 +116,7 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
                 serverLogs.contains(
                         "org.apache.seatunnel.e2e.sink.inmemory.InMemorySaveModeHandler - handle data savemode with table path: test.table2"));
 
+        Thread.sleep(10000);
         // restore will not execute savemode
         execResult = restoreJob(server, "/savemode/fake_to_inmemory_savemode.conf", "1");
         Assertions.assertEquals(0, execResult.getExitCode(), execResult.getStderr());

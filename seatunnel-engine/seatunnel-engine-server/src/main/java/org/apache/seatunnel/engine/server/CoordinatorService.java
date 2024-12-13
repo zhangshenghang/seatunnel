@@ -322,6 +322,25 @@ public class CoordinatorService {
     private void completeFailJob(JobMaster jobMaster) {
         // If the pending queue is not enabled and resources are insufficient, stop the task from
         // running
+        StringBuilder error = new StringBuilder();
+        resourceManager
+                .getRegisterWorker()
+                .forEach(
+                        (address, worker) -> {
+                            error.append("address:")
+                                    .append(worker.getAddress())
+                                    .append(" weifenpei:")
+                                    .append(
+                                            worker.getUnassignedSlots() != null
+                                                    ? worker.getUnassignedSlots().length
+                                                    : 0)
+                                    .append(" \t yifenpei:")
+                                    .append(
+                                            worker.getAssignedSlots() != null
+                                                    ? worker.getAssignedSlots().length
+                                                    : 0)
+                                    .append("\n");
+                        });
         JobResult jobResult =
                 new JobResult(
                         JobStatus.FAILED,
