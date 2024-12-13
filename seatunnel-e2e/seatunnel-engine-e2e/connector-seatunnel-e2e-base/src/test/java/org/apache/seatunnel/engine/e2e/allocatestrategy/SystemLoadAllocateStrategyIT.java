@@ -98,6 +98,8 @@ public class SystemLoadAllocateStrategyIT {
         MemberAttributeConfig node1Tags = new MemberAttributeConfig();
         node1Tags.setAttribute("strategy", "system_load1");
         seaTunnelConfig.getHazelcastConfig().setMemberAttributeConfig(node1Tags);
+        seaTunnelConfig.getHazelcastConfig().getNetworkConfig().setPort(5808);
+        seaTunnelConfig.getEngineConfig().getHttpConfig().setEnabled(false);
         try {
             node1 = SeaTunnelServerStarter.createHazelcastInstance(seaTunnelConfig);
             MemberAttributeConfig node2Tags = new MemberAttributeConfig();

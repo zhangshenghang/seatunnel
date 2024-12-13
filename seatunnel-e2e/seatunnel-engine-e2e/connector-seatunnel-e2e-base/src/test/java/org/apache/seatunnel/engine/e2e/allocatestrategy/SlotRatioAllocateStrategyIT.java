@@ -84,6 +84,8 @@ public class SlotRatioAllocateStrategyIT {
         SeaTunnelClient engineClient = null;
 
         SeaTunnelConfig seaTunnelConfig = ConfigProvider.locateAndGetSeaTunnelConfig();
+        seaTunnelConfig.getHazelcastConfig().getNetworkConfig().setPort(5805);
+        seaTunnelConfig.getEngineConfig().getHttpConfig().setEnabled(false);
         seaTunnelConfig
                 .getHazelcastConfig()
                 .setClusterName(TestUtils.getClusterName(testClusterName));
