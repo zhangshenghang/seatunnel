@@ -51,8 +51,6 @@ public class FixSlotResourceTest extends AbstractSeaTunnelServerTest<FixSlotReso
     @Test
     public void testEnoughResource() throws ExecutionException, InterruptedException {
         ResourceManager resourceManager = server.getCoordinatorService().getResourceManager();
-        //        ((AbstractResourceManager) resourceManager)
-        //                .setWorkerAssignedSlots(new ConcurrentHashMap<>());
         // wait all slot ready
         await().atMost(20000, TimeUnit.MILLISECONDS)
                 .untilAsserted(

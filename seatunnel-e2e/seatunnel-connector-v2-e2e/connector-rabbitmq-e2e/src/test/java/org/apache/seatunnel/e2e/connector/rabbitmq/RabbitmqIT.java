@@ -37,6 +37,7 @@ import org.apache.seatunnel.format.json.JsonSerializationSchema;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.TestTemplate;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.GenericContainer;
@@ -66,6 +67,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 
+@Disabled("Temporarily closed, there is a problem with the official mirror")
 @Slf4j
 public class RabbitmqIT extends TestSuiteBase implements TestResource {
     private static final String IMAGE = "rabbitmq:3-management";
