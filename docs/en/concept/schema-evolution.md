@@ -12,6 +12,8 @@ Now we only support the operation about `add column`、`drop column`、`rename c
 ### Sink
 [Jdbc-Mysql](https://github.com/apache/seatunnel/blob/dev/docs/en/connector-v2/sink/Jdbc.md)
 [Jdbc-Oracle](https://github.com/apache/seatunnel/blob/dev/docs/en/connector-v2/sink/Jdbc.md)
+[StarRocks](https://github.com/apache/seatunnel/blob/dev/docs/en/connector-v2/sink/StarRocks.md)
+[Paimon](https://github.com/apache/seatunnel/blob/dev/docs/en/connector-v2/sink/Paimon.md#Schema-Evolution)
 
 Note: The schema evolution is not support the transform at now. The schema evolution of different types of databases（Oracle-CDC -> Jdbc-Mysql）is currently not supported the default value of the column in ddl.
 
@@ -75,7 +77,7 @@ env {
 source {
   # This is a example source plugin **only for test and demonstrate the feature source plugin**
   Oracle-CDC {
-    result_table_name = "customers"
+    plugin_output = "customers"
     username = "dbzuser"
     password = "dbz"
     database-names = ["ORCLCDB"]
@@ -93,7 +95,7 @@ source {
 
 sink {
     Jdbc {
-      source_table_name = "customers"
+      plugin_input = "customers"
       driver = "oracle.jdbc.driver.OracleDriver"
       url = "jdbc:oracle:thin:@oracle-host:1521/ORCLCDB"
       user = "dbzuser"
@@ -120,7 +122,7 @@ env {
 source {
   # This is a example source plugin **only for test and demonstrate the feature source plugin**
   Oracle-CDC {
-    result_table_name = "customers"
+    plugin_output = "customers"
     username = "dbzuser"
     password = "dbz"
     database-names = ["ORCLCDB"]
@@ -138,7 +140,7 @@ source {
 
 sink {
   jdbc {
-    source_table_name = "customers"
+    plugin_input = "customers"
     url = "jdbc:mysql://oracle-host:3306/oracle_sink"
     driver = "com.mysql.cj.jdbc.Driver"
     user = "st_user_sink"
@@ -148,6 +150,58 @@ sink {
     database = oracle_sink
     table = oracle_cdc_2_mysql_sink_table
     primary_keys = ["ID"]
+  }
+}
+```
+
+### Mysql-cdc -> StarRocks
+```
+env {
+  # You can set engine configuration here
+  parallelism = 1
+  job.mode = "STREAMING"
+  checkpoint.interval = 5000
+}
+
+source {
+  MySQL-CDC {
+    username = "st_user_source"
+    password = "mysqlpw"
+    table-names = ["shop.products"]
+    base-url = "jdbc:mysql://mysql_cdc_e2e:3306/shop"
+    debezium = {
+      include.schema.changes = true
+    }
+  }
+}
+
+sink {
+  StarRocks {
+    nodeUrls = ["starrocks_cdc_e2e:8030"]
+    username = "root"
+    password = ""
+    database = "shop"
+    table = "${table_name}"
+    base-url = "jdbc:mysql://starrocks_cdc_e2e:9030/shop"
+    max_retries = 3
+    enable_upsert_delete = true
+    schema_save_mode="RECREATE_SCHEMA"
+    data_save_mode="DROP_DATA"
+    save_mode_create_template = """
+    CREATE TABLE IF NOT EXISTS shop.`${table_name}` (
+        ${rowtype_primary_key},
+        ${rowtype_fields}
+        ) ENGINE=OLAP
+        PRIMARY KEY (${rowtype_primary_key})
+        DISTRIBUTED BY HASH (${rowtype_primary_key})
+        PROPERTIES (
+                "replication_num" = "1",
+                "in_memory" = "false",
+                "enable_persistent_index" = "true",
+                "replicated_storage" = "true",
+                "compression" = "LZ4"
+          )
+    """
   }
 }
 ```
