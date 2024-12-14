@@ -66,6 +66,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 
+@Disabled("Temporarily closed, there is a problem with the official mirror")
 @Slf4j
 public class RabbitmqIT extends TestSuiteBase implements TestResource {
     private static final String IMAGE = "rabbitmq:3-management";
