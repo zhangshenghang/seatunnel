@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.engine.server.service.slot;
 
+import org.apache.seatunnel.engine.common.config.server.AllocateStrategy;
 import org.apache.seatunnel.engine.common.config.server.SlotServiceConfig;
 import org.apache.seatunnel.engine.common.utils.IdGenerator;
 import org.apache.seatunnel.engine.server.TaskExecutionService;
@@ -113,16 +114,33 @@ public class DefaultSlotService implements SlotService {
                         LOGGER.fine(
                                 "start send heartbeat to resource manager, this address: "
                                         + nodeEngine.getClusterService().getThisAddress());
+                        // Must first obtain SYSTEM_LOAD and then obtain workProfile. If you obtain
+                        // workProfile first and then obtain SYSTEM_LOAD, resource information will
+                        // be reported inaccurately.
+                        SystemLoadInfo systemLoadInfo =
+                                Optional.of(systemLoadSendCountDown.decrementAndGet())
+                                        .filter(
+                                                count ->
+                                                        count == 0
+                                                                && config.getAllocateStrategy()
+                                                                        == AllocateStrategy
+                                                                                .SYSTEM_LOAD)
+                                        .map(
+                                                count -> {
+                                                    systemLoadSendCountDown.set(
+                                                            SYSTEM_LOAD_SEND_INTERVAL);
+                                                    SystemLoadInfo info = new SystemLoadInfo();
+                                                    info.setCpuPercentage(getCpuPercentage());
+                                                    info.setMemPercentage(getMemPercentage());
+                                                    LOGGER.fine("send system load info to master");
+                                                    return info;
+                                                })
+                                        .orElse(null);
+
                         WorkerProfile workerProfile = getWorkerProfile();
-                        if (systemLoadSendCountDown.decrementAndGet() == 0) {
-                            // Send system load information to master
-                            SystemLoadInfo systemLoadInfo = new SystemLoadInfo();
-                            systemLoadInfo.setCpuPercentage(getCpuPercentage());
-                            systemLoadInfo.setMemPercentage(getMemPercentage());
-                            workerProfile.setSystemLoadInfo(systemLoadInfo);
-                            systemLoadSendCountDown.set(SYSTEM_LOAD_SEND_INTERVAL);
-                            LOGGER.fine("send system load info to master");
-                        }
+                        Optional.ofNullable(systemLoadInfo)
+                                .ifPresent(workerProfile::setSystemLoadInfo);
+
                         sendToMaster(new WorkerHeartbeatOperation(workerProfile)).join();
                     } catch (Exception e) {
                         LOGGER.warning(

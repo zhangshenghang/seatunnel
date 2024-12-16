@@ -42,7 +42,6 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
 
     @Test
     public void testJobRetryTimes() throws IOException, InterruptedException {
-        this.sleep();
         Container.ExecResult execResult =
                 executeJob(server, "/retry-times/stream_fake_to_inmemory_with_error_retry_1.conf");
         Assertions.assertNotEquals(0, execResult.getExitCode());
@@ -67,7 +66,6 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
 
     @Test
     public void testNoDuplicatedReleaseSlot() throws IOException, InterruptedException {
-        this.sleep();
         Container.ExecResult execResult =
                 executeJob(server, "/savemode/fake_to_inmemory_savemode.conf");
         Assertions.assertEquals(0, execResult.getExitCode());
@@ -77,7 +75,6 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
 
     @Test
     public void testMultiTableSinkFailedWithThrowable() throws IOException, InterruptedException {
-        this.sleep();
         Container.ExecResult execResult =
                 executeJob(server, "/stream_fake_to_inmemory_with_throwable_error.conf");
         Assertions.assertNotEquals(0, execResult.getExitCode());
@@ -88,7 +85,6 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
 
     @Test
     public void testSaveModeOnMasterOrClient() throws IOException, InterruptedException {
-        this.sleep();
         Container.ExecResult execResult =
                 executeJob(server, "/savemode/fake_to_inmemory_savemode.conf");
         Assertions.assertEquals(0, execResult.getExitCode(), execResult.getStderr());
@@ -107,7 +103,6 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
                 serverLogs.contains(
                         "org.apache.seatunnel.e2e.sink.inmemory.InMemorySaveModeHandler - handle data savemode with table path: test.table2"));
 
-        this.sleep();
         // restore will not execute savemode
         execResult = restoreJob(server, "/savemode/fake_to_inmemory_savemode.conf", "1");
         Assertions.assertEquals(0, execResult.getExitCode(), execResult.getStderr());
@@ -135,7 +130,6 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
 
     @Test
     public void testJobFailedWillThrowException() throws IOException, InterruptedException {
-        this.sleep();
         Container.ExecResult execResult = executeSeaTunnelJob("/batch_slot_not_enough.conf");
         Assertions.assertNotEquals(0, execResult.getExitCode());
         Assertions.assertTrue(
@@ -144,17 +138,5 @@ public class JobClientJobProxyIT extends SeaTunnelContainer {
                                 .getStderr()
                                 .contains(
                                         "org.apache.seatunnel.engine.server.resourcemanager.NoEnoughResourceException"));
-    }
-
-    /**
-     * Sleep, wait for Slot heartbeat report. If you do not sleep, there is a certain probability
-     * that resources will be insufficient.
-     */
-    private void sleep() {
-        try {
-            Thread.sleep(5000);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
     }
 }

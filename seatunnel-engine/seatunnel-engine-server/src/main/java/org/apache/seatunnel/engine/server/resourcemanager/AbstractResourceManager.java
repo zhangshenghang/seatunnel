@@ -263,6 +263,11 @@ public abstract class AbstractResourceManager implements ResourceManager {
         }
         registerWorker.put(workerProfile.getAddress(), workerProfile);
 
+        this.updateWorkerLoad(workerProfile);
+    }
+
+    /** Update worker load info. */
+    private void updateWorkerLoad(WorkerProfile workerProfile) {
         if (slotAllocationStrategy instanceof SystemLoadStrategy
                 && Objects.nonNull(workerProfile.getSystemLoadInfo())) {
             ((SystemLoadStrategy) slotAllocationStrategy)
