@@ -76,7 +76,7 @@ public class ChineseCharacterCheckTest {
 
     private void checkChineseCharacters(CheckScope scope) {
         // Define path fragments for source and test Java files
-        String testPathFragment = isWindows ? "src\\main\\java" : "src/main/java";
+        String mainPathFragment = isWindows ? "src\\main\\java" : "src/main/java";
         String testPathFragment2 = isWindows ? "src\\test\\java" : "src/test/java";
 
         try (Stream<Path> paths = Files.walk(Paths.get(".."), FileVisitOption.FOLLOW_LINKS)) {
@@ -87,7 +87,7 @@ public class ChineseCharacterCheckTest {
                             path -> {
                                 String pathString = path.toString();
                                 return pathString.endsWith(".java")
-                                        && (pathString.contains(testPathFragment)
+                                        && (pathString.contains(mainPathFragment)
                                                 || pathString.contains(testPathFragment2));
                             })
                     .forEach(
