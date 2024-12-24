@@ -116,7 +116,7 @@ public class IncrementalSourceReader<T, C extends SourceConfig>
             log.info("Reader {} send NoMoreElement event", context.getIndexOfSubtask());
             context.signalNoMoreElement();
         } else {
-            super.pollNext(output);
+            super.pollNextV2(output);
         }
     }
 
