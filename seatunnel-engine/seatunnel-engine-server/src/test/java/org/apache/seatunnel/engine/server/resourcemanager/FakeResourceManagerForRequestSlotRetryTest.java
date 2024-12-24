@@ -49,7 +49,6 @@ public class FakeResourceManagerForRequestSlotRetryTest extends AbstractResource
         super(nodeEngine, new EngineConfig());
         this.newWorkerCount = newWorkerCount;
         this.noSlotWorkerCount = noSlotWorkerCount;
-        //        this.setWorkerAssignedSlots(new ConcurrentHashMap<>());
         init();
     }
 
