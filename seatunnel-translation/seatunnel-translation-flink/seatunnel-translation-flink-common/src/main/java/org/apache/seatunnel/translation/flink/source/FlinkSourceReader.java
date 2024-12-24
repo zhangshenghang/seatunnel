@@ -77,6 +77,16 @@ public class FlinkSourceReader<SplitT extends SourceSplit>
     @Override
     public InputStatus pollNext(ReaderOutput<SeaTunnelRow> output) throws Exception {
         if (!((FlinkSourceReaderContext) context).isSendNoMoreElementEvent()) {
+            //            try {
+            //                Class<?> incrementalSourceReaderClass =
+            // Class.forName("org.apache.seatunnel.connectors.cdc.base.source.reader.IncrementalSourceReader");
+            //                if (incrementalSourceReaderClass.isInstance(sourceReader)) {
+            //                    sourceReader.pollNext(flinkRowCollector.withReaderOutput(output));
+            //                    return inputStatus;
+            //                }
+            //            } catch (ClassNotFoundException e) {
+            //                LOGGER.error("IncrementalSourceReader class not found", e);
+            //            }
             org.apache.seatunnel.api.source.InputStatus sourceStatus =
                     sourceReader.pollNextV2(flinkRowCollector.withReaderOutput(output));
             if (sourceStatus != null) {

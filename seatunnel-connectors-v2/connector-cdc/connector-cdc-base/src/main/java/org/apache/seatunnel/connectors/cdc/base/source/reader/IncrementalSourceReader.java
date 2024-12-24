@@ -18,6 +18,7 @@
 package org.apache.seatunnel.connectors.cdc.base.source.reader;
 
 import org.apache.seatunnel.api.source.Collector;
+import org.apache.seatunnel.api.source.InputStatus;
 import org.apache.seatunnel.api.source.SourceReader;
 import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.connectors.cdc.base.config.SourceConfig;
@@ -118,6 +119,15 @@ public class IncrementalSourceReader<T, C extends SourceConfig>
         } else {
             super.pollNextV2(output);
         }
+    }
+
+    @Override
+    public InputStatus pollNextV2(Collector<T> output) throws Exception {
+        // TODO We are currently using the old version here, and will need to switch to the new
+        // version interface to support FutureCompletingBlockingQueue in the future
+        this.pollNext(output);
+        // Return empty because the old version is stateless
+        return null;
     }
 
     @Override
