@@ -113,6 +113,7 @@ public class KafkaSourceReader
     @Override
     public void pollNext(Collector<SeaTunnelRow> output) throws Exception {
         // Nothing, Kafka use the new interface pollNext2
+        this.pollNextV2(output);
     }
 
     @Override
