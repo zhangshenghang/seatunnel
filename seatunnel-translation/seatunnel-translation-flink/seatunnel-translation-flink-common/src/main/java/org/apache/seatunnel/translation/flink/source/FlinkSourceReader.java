@@ -77,7 +77,13 @@ public class FlinkSourceReader<SplitT extends SourceSplit>
     @Override
     public InputStatus pollNext(ReaderOutput<SeaTunnelRow> output) throws Exception {
         if (!((FlinkSourceReaderContext) context).isSendNoMoreElementEvent()) {
-            sourceReader.pollNext(flinkRowCollector.withReaderOutput(output));
+            org.apache.seatunnel.api.source.InputStatus sourceStatus =
+                    sourceReader.pollNextV2(flinkRowCollector.withReaderOutput(output));
+            if (sourceStatus != null) {
+                inputStatus = InputStatus.valueOf(sourceStatus.name());
+            } else {
+                sourceReader.pollNext(flinkRowCollector.withReaderOutput(output));
+            }
         } else {
             // reduce CPU idle
             Thread.sleep(1000L);
@@ -97,7 +103,7 @@ public class FlinkSourceReader<SplitT extends SourceSplit>
 
     @Override
     public CompletableFuture<Void> isAvailable() {
-        return CompletableFuture.completedFuture(null);
+        return sourceReader.isAvailable();
     }
 
     @Override

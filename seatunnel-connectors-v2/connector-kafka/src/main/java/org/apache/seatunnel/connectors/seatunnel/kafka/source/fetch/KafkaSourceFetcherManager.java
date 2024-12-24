@@ -22,6 +22,7 @@ import org.apache.seatunnel.connectors.seatunnel.common.source.reader.fetcher.Si
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.fetcher.SplitFetcher;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.fetcher.SplitFetcherTask;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.splitreader.SplitReader;
+import org.apache.seatunnel.connectors.seatunnel.common.source.reader.synchronization.FutureCompletingBlockingQueue;
 import org.apache.seatunnel.connectors.seatunnel.kafka.source.KafkaPartitionSplitReader;
 import org.apache.seatunnel.connectors.seatunnel.kafka.source.KafkaSourceSplit;
 
@@ -36,7 +37,6 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -46,14 +46,16 @@ public class KafkaSourceFetcherManager
     private static final Logger logger = LoggerFactory.getLogger(KafkaSourceFetcherManager.class);
 
     public KafkaSourceFetcherManager(
-            BlockingQueue<RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>>> elementsQueue,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>>>
+                    elementsQueue,
             Supplier<SplitReader<ConsumerRecord<byte[], byte[]>, KafkaSourceSplit>>
                     splitReaderSupplier) {
         super(elementsQueue, splitReaderSupplier);
     }
 
     public KafkaSourceFetcherManager(
-            BlockingQueue<RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>>> elementsQueue,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>>>
+                    elementsQueue,
             Supplier<SplitReader<ConsumerRecord<byte[], byte[]>, KafkaSourceSplit>>
                     splitReaderSupplier,
             Consumer<Collection<String>> splitFinishedHook) {
@@ -88,8 +90,9 @@ public class KafkaSourceFetcherManager
         splitFetcher.addTask(
                 new SplitFetcherTask() {
                     @Override
-                    public void run() throws IOException {
+                    public boolean run() throws IOException {
                         kafkaReader.notifyCheckpointComplete(offsetsToCommit, callback);
+                        return true;
                     }
 
                     @Override

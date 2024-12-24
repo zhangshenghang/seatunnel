@@ -18,8 +18,10 @@
 package org.apache.seatunnel.connectors.seatunnel.common.source.reader.fetcher;
 
 import org.apache.seatunnel.api.source.SourceSplit;
+import org.apache.seatunnel.connectors.seatunnel.common.source.reader.RecordsBySplits;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.RecordsWithSplitIds;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.splitreader.SplitReader;
+import org.apache.seatunnel.connectors.seatunnel.common.source.reader.synchronization.FutureCompletingBlockingQueue;
 
 import lombok.Getter;
 import lombok.NonNull;
@@ -27,10 +29,11 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayDeque;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
@@ -40,6 +43,7 @@ public class SplitFetcher<E, SplitT extends SourceSplit> implements Runnable {
     @Getter private final int fetcherId;
     private final Deque<SplitFetcherTask> taskQueue = new ArrayDeque<>();
     @Getter private final Map<String, SplitT> assignedSplits = new HashMap<>();
+    private final FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue;
     @Getter private final SplitReader<E, SplitT> splitReader;
     private final Consumer<Throwable> errorHandler;
     private final Runnable shutdownHook;
@@ -51,13 +55,23 @@ public class SplitFetcher<E, SplitT extends SourceSplit> implements Runnable {
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition nonEmpty = lock.newCondition();
 
+    /**
+     * A shutdown latch to help make sure the SplitReader is only closed after all the emitted
+     * records have been processed by the main reader thread. This is needed because in some cases,
+     * the records in the <tt>RecordsWithSplitIds</tt> may have not been processed when the split
+     * fetcher shuts down.
+     */
+    private final CountDownLatch recordsProcessedLatch;
+
     SplitFetcher(
             int fetcherId,
-            @NonNull BlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
+            @NonNull FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
             @NonNull SplitReader<E, SplitT> splitReader,
             @NonNull Consumer<Throwable> errorHandler,
             @NonNull Runnable shutdownHook,
             @NonNull Consumer<Collection<String>> splitFinishedHook) {
+        this.recordsProcessedLatch = new CountDownLatch(1);
+        this.elementsQueue = elementsQueue;
         this.fetcherId = fetcherId;
         this.splitReader = splitReader;
         this.errorHandler = errorHandler;
@@ -81,6 +95,20 @@ public class SplitFetcher<E, SplitT extends SourceSplit> implements Runnable {
             while (runOnce()) {
                 // nothing to do, everything is inside #runOnce.
             }
+            if (recordsProcessedLatch.getCount() > 0) {
+                // Put an empty synchronization batch to the element queue.
+                // When this batch is recycled, all the records emitted earlier
+                // must have already been processed.
+                elementsQueue.put(
+                        fetcherId,
+                        new RecordsBySplits<E>(Collections.emptyMap(), Collections.emptySet()) {
+                            @Override
+                            public void recycle() {
+                                super.recycle();
+                                recordsProcessedLatch.countDown();
+                            }
+                        });
+            }
         } catch (Throwable t) {
             errorHandler.accept(t);
         } finally {
@@ -89,8 +117,20 @@ public class SplitFetcher<E, SplitT extends SourceSplit> implements Runnable {
             } catch (Exception e) {
                 errorHandler.accept(e);
             } finally {
-                log.info("Split fetcher {} exited.", fetcherId);
-                shutdownHook.run();
+                try {
+                    recordsProcessedLatch.await();
+                    splitReader.close();
+                } catch (Exception e) {
+                    errorHandler.accept(e);
+                } finally {
+                    log.info("Split fetcher {} exited.", fetcherId);
+                    // This executes after possible errorHandler.accept(t). If these operations bear
+                    // a happens-before relation, then we can checking side effect of
+                    // errorHandler.accept(t)
+                    // to know whether it happened after observing side effect of
+                    // shutdownHook.run().
+                    shutdownHook.run();
+                }
             }
         }
     }
@@ -114,7 +154,15 @@ public class SplitFetcher<E, SplitT extends SourceSplit> implements Runnable {
         }
     }
 
+    /** Shutdown the split fetcher. */
     public void shutdown() {
+        shutdown(false);
+    }
+
+    public void shutdown(boolean waitingForRecordsProcessed) {
+        if (!waitingForRecordsProcessed) {
+            recordsProcessedLatch.countDown();
+        }
         lock.lock();
         try {
             if (!closed) {
@@ -158,8 +206,9 @@ public class SplitFetcher<E, SplitT extends SourceSplit> implements Runnable {
         }
 
         // execute the task outside of lock, so that it can be woken up
+        boolean taskFinished;
         try {
-            nextTask.run();
+            taskFinished = nextTask.run();
         } catch (Exception e) {
             throw new RuntimeException(
                     String.format(
@@ -172,10 +221,28 @@ public class SplitFetcher<E, SplitT extends SourceSplit> implements Runnable {
         lock.lock();
         try {
             this.runningTask = null;
+            processTaskResultUnsafe(nextTask, taskFinished);
         } finally {
             lock.unlock();
         }
         return true;
+    }
+
+    private void processTaskResultUnsafe(SplitFetcherTask task, boolean taskFinished) {
+        assert lock.isHeldByCurrentThread();
+        if (taskFinished) {
+            log.debug("Finished running task {}", task);
+            if (assignedSplits.isEmpty() && taskQueue.isEmpty()) {
+                // because the method might get invoked past the point when the source reader
+                // last checked the elements queue, we need to notify availability in the case
+                // when we become idle
+                elementsQueue.notifyAvailable();
+            }
+        } else if (task != fetchTask) {
+            // task was woken up, so repeat
+            taskQueue.addFirst(task);
+            log.debug("Reenqueuing woken task {}", task);
+        }
     }
 
     private SplitFetcherTask getNextTaskUnsafe() {

@@ -20,6 +20,7 @@ package org.apache.seatunnel.connectors.seatunnel.common.source.reader.fetcher;
 import org.apache.seatunnel.api.source.SourceSplit;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.RecordsWithSplitIds;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.splitreader.SplitReader;
+import org.apache.seatunnel.connectors.seatunnel.common.source.reader.synchronization.FutureCompletingBlockingQueue;
 
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -28,8 +29,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.util.Collection;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -38,7 +37,7 @@ class FetchTask<E, SplitT extends SourceSplit> implements SplitFetcherTask {
     private static final int OFFER_TIMEOUT_MILLIS = 10000;
 
     private final SplitReader<E, SplitT> splitReader;
-    private final BlockingQueue<RecordsWithSplitIds<E>> elementsQueue;
+    private final FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue;
     private final Consumer<Collection<String>> splitFinishedCallback;
     private final int fetcherIndex;
 
@@ -48,7 +47,7 @@ class FetchTask<E, SplitT extends SourceSplit> implements SplitFetcherTask {
     private volatile RecordsWithSplitIds<E> lastRecords;
 
     @Override
-    public void run() throws IOException {
+    public boolean run() throws IOException {
         try {
             if (!isWakeup() && lastRecords == null) {
                 lastRecords = splitReader.fetch();
@@ -56,12 +55,14 @@ class FetchTask<E, SplitT extends SourceSplit> implements SplitFetcherTask {
             }
 
             if (!isWakeup()) {
-                if (elementsQueue.offer(lastRecords, OFFER_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) {
+                // The order matters here. We must first put the last records into the queue.
+                // This ensures the handling of the fetched records is atomic to wakeup.
+                if (elementsQueue.put(fetcherIndex, lastRecords)) {
                     if (!lastRecords.finishedSplits().isEmpty()) {
+                        // The callback does not throw InterruptedException.
                         splitFinishedCallback.accept(lastRecords.finishedSplits());
                     }
                     lastRecords = null;
-                    log.debug("Enqueued records from split fetcher {}", fetcherIndex);
                 } else {
                     log.debug(
                             "Enqueuing timed out in split fetcher {}, queue is blocked",
@@ -77,6 +78,7 @@ class FetchTask<E, SplitT extends SourceSplit> implements SplitFetcherTask {
                 wakeup = false;
             }
         }
+        return true;
     }
 
     @Override

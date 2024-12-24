@@ -21,9 +21,8 @@ import org.apache.seatunnel.api.source.SourceReader;
 import org.apache.seatunnel.api.source.SourceSplit;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.fetcher.SingleThreadFetcherManager;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.splitreader.SplitReader;
+import org.apache.seatunnel.connectors.seatunnel.common.source.reader.synchronization.FutureCompletingBlockingQueue;
 
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
 import java.util.function.Supplier;
 
 /**
@@ -45,7 +44,7 @@ public abstract class SingleThreadMultiplexSourceReaderBase<
             SourceReaderOptions options,
             SourceReader.Context context) {
         this(
-                new ArrayBlockingQueue<>(options.getElementQueueCapacity()),
+                new FutureCompletingBlockingQueue<>(options.getElementQueueCapacity()),
                 splitReaderSupplier,
                 recordEmitter,
                 options,
@@ -53,7 +52,7 @@ public abstract class SingleThreadMultiplexSourceReaderBase<
     }
 
     public SingleThreadMultiplexSourceReaderBase(
-            BlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
             Supplier<SplitReader<E, SplitT>> splitReaderSupplier,
             RecordEmitter<E, T, SplitStateT> recordEmitter,
             SourceReaderOptions options,
@@ -67,7 +66,7 @@ public abstract class SingleThreadMultiplexSourceReaderBase<
     }
 
     public SingleThreadMultiplexSourceReaderBase(
-            BlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
             SingleThreadFetcherManager<E, SplitT> splitFetcherManager,
             RecordEmitter<E, T, SplitStateT> recordEmitter,
             SourceReaderOptions options,

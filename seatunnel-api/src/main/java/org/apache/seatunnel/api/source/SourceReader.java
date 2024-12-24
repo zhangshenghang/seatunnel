@@ -23,6 +23,7 @@ import org.apache.seatunnel.api.state.CheckpointListener;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * The {@link SourceReader} is used to generate source record, and it will be running at worker.
@@ -52,6 +53,17 @@ public interface SourceReader<T, SplitT extends SourceSplit>
     void pollNext(Collector<T> output) throws Exception;
 
     /**
+     * Generate the next batch of records.
+     *
+     * @param output output collector.
+     * @return InputStatus
+     * @throws Exception if error occurs.
+     */
+    default InputStatus pollNextV2(Collector<T> output) throws Exception {
+        return null;
+    };
+
+    /**
      * Get the current split checkpoint state by checkpointId.
      *
      * <p>If the source is bounded, checkpoint is not triggered.
@@ -62,6 +74,9 @@ public interface SourceReader<T, SplitT extends SourceSplit>
      */
     List<SplitT> snapshotState(long checkpointId) throws Exception;
 
+    default CompletableFuture<Void> isAvailable() {
+        return CompletableFuture.completedFuture(null);
+    }
     /**
      * Add the split checkpoint state to reader.
      *

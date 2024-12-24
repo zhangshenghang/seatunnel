@@ -19,12 +19,14 @@ package org.apache.seatunnel.connectors.seatunnel.common.source.reader;
 
 import org.apache.seatunnel.api.source.Boundedness;
 import org.apache.seatunnel.api.source.Collector;
+import org.apache.seatunnel.api.source.InputStatus;
 import org.apache.seatunnel.api.source.SourceEvent;
 import org.apache.seatunnel.api.source.SourceReader;
 import org.apache.seatunnel.api.source.SourceSplit;
 import org.apache.seatunnel.common.utils.SeaTunnelException;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.fetcher.SplitFetcherManager;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.splitreader.SplitReader;
+import org.apache.seatunnel.connectors.seatunnel.common.source.reader.synchronization.FutureCompletingBlockingQueue;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +37,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -55,20 +56,20 @@ import static org.apache.seatunnel.shade.com.google.common.base.Preconditions.ch
 @Slf4j
 public abstract class SourceReaderBase<E, T, SplitT extends SourceSplit, SplitStateT>
         implements SourceReader<T, SplitT> {
-    private final BlockingQueue<RecordsWithSplitIds<E>> elementsQueue;
+    public final FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue;
     private final ConcurrentMap<String, SplitContext<T, SplitStateT>> splitStates;
     protected final RecordEmitter<E, T, SplitStateT> recordEmitter;
     protected final SplitFetcherManager<E, SplitT> splitFetcherManager;
     protected final SourceReaderOptions options;
     protected final SourceReader.Context context;
 
-    private RecordsWithSplitIds<E> currentFetch;
+    public RecordsWithSplitIds<E> currentFetch;
     protected SplitContext<T, SplitStateT> currentSplitContext;
     private Collector<T> currentSplitOutput;
     @Getter private volatile boolean noMoreSplitsAssignment;
 
     public SourceReaderBase(
-            BlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
             SplitFetcherManager<E, SplitT> splitFetcherManager,
             RecordEmitter<E, T, SplitStateT> recordEmitter,
             SourceReaderOptions options,
@@ -86,8 +87,13 @@ public abstract class SourceReaderBase<E, T, SplitT extends SourceSplit, SplitSt
         log.info("Open Source Reader.");
     }
 
+    private InputStatus trace(InputStatus status) {
+        log.trace("Source reader status: {}", status);
+        return status;
+    }
+
     @Override
-    public void pollNext(Collector<T> output) throws Exception {
+    public InputStatus pollNextV2(Collector<T> output) throws Exception {
         RecordsWithSplitIds<E> recordsWithSplitId = this.currentFetch;
         if (recordsWithSplitId == null) {
             recordsWithSplitId = getNextFetch(output);
@@ -100,18 +106,38 @@ public abstract class SourceReaderBase<E, T, SplitT extends SourceSplit, SplitSt
                             "Reader {} into idle state, send NoMoreElement event",
                             context.getIndexOfSubtask());
                 }
-                return;
+                return trace(finishedOrAvailableLater());
             }
         }
 
-        E record = recordsWithSplitId.nextRecordFromSplit();
-        if (record != null) {
-            synchronized (output.getCheckpointLock()) {
-                recordEmitter.emitRecord(record, currentSplitOutput, currentSplitContext.state);
+        while (true) {
+            E record = recordsWithSplitId.nextRecordFromSplit();
+            if (record != null) {
+                synchronized (output.getCheckpointLock()) {
+                    recordEmitter.emitRecord(record, currentSplitOutput, currentSplitContext.state);
+                }
+                log.trace("Emitted record: {}", record);
+                return trace(InputStatus.MORE_AVAILABLE);
+            } else if (!moveToNextSplit(recordsWithSplitId, output)) {
+                return pollNextV2(output);
             }
-            log.trace("Emitted record: {}", record);
-        } else if (!moveToNextSplit(recordsWithSplitId, output)) {
-            pollNext(output);
+        }
+    }
+
+    private InputStatus finishedOrAvailableLater() {
+        final boolean allFetchersHaveShutdown = splitFetcherManager.maybeShutdownFinishedFetchers();
+        if (!(noMoreSplitsAssignment && allFetchersHaveShutdown)) {
+            return InputStatus.NOTHING_AVAILABLE;
+        }
+        if (elementsQueue.isEmpty()) {
+            // We may reach here because of exceptional split fetcher, check it.
+            splitFetcherManager.checkErrors();
+            return InputStatus.END_OF_INPUT;
+        } else {
+            // We can reach this case if we just processed all data from the queue and finished a
+            // split,
+            // and concurrently the fetcher finished another split, whose data is then in the queue.
+            return InputStatus.MORE_AVAILABLE;
         }
     }
 

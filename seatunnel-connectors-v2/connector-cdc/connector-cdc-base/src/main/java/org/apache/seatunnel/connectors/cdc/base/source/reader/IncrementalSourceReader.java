@@ -39,6 +39,7 @@ import org.apache.seatunnel.connectors.seatunnel.common.source.reader.RecordsWit
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.SingleThreadMultiplexSourceReaderBase;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.SourceReaderOptions;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.fetcher.SingleThreadFetcherManager;
+import org.apache.seatunnel.connectors.seatunnel.common.source.reader.synchronization.FutureCompletingBlockingQueue;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -47,7 +48,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -79,7 +79,7 @@ public class IncrementalSourceReader<T, C extends SourceConfig>
 
     public IncrementalSourceReader(
             DataSourceDialect<C> dataSourceDialect,
-            BlockingQueue<RecordsWithSplitIds<SourceRecords>> elementsQueue,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<SourceRecords>> elementsQueue,
             Supplier<IncrementalSourceSplitReader<C>> splitReaderSupplier,
             RecordEmitter<SourceRecords, T, SourceSplitStateBase> recordEmitter,
             SourceReaderOptions options,

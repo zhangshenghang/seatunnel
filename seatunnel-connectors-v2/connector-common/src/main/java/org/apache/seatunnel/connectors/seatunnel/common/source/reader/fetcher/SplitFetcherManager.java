@@ -20,13 +20,13 @@ package org.apache.seatunnel.connectors.seatunnel.common.source.reader.fetcher;
 import org.apache.seatunnel.api.source.SourceSplit;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.RecordsWithSplitIds;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.splitreader.SplitReader;
+import org.apache.seatunnel.connectors.seatunnel.common.source.reader.synchronization.FutureCompletingBlockingQueue;
 
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -48,7 +48,7 @@ import java.util.function.Supplier;
 @Slf4j
 public abstract class SplitFetcherManager<E, SplitT extends SourceSplit> {
     protected final Map<Integer, SplitFetcher<E, SplitT>> fetchers;
-    private final BlockingQueue<RecordsWithSplitIds<E>> elementsQueue;
+    private final FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue;
     private final Supplier<SplitReader<E, SplitT>> splitReaderFactory;
     private final Consumer<Collection<String>> splitFinishedHook;
     private final AtomicInteger fetcherIdGenerator;
@@ -58,13 +58,13 @@ public abstract class SplitFetcherManager<E, SplitT extends SourceSplit> {
     private volatile boolean closed;
 
     public SplitFetcherManager(
-            BlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
             Supplier<SplitReader<E, SplitT>> splitReaderFactory) {
         this(elementsQueue, splitReaderFactory, ignore -> {});
     }
 
     public SplitFetcherManager(
-            BlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
             Supplier<SplitReader<E, SplitT>> splitReaderFactory,
             Consumer<Collection<String>> splitFinishedHook) {
         this.fetchers = new ConcurrentHashMap<>();

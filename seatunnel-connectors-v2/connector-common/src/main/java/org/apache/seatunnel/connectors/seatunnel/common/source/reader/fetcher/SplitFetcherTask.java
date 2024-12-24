@@ -25,7 +25,7 @@ public interface SplitFetcherTask {
      * Run the logic. This method allows throwing an interrupted exception on wakeup, but the
      * implementation does not have to.
      */
-    void run() throws IOException;
+    boolean run() throws IOException;
 
     /** Wake up the running thread. */
     void wakeUp();

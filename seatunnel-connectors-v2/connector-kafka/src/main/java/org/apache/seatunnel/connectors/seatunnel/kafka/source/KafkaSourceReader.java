@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.connectors.seatunnel.kafka.source;
 
+import org.apache.seatunnel.api.source.Collector;
 import org.apache.seatunnel.api.source.SourceReader;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.RecordEmitter;
@@ -24,6 +25,7 @@ import org.apache.seatunnel.connectors.seatunnel.common.source.reader.RecordsWit
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.SingleThreadMultiplexSourceReaderBase;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.SourceReaderOptions;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.fetcher.SingleThreadFetcherManager;
+import org.apache.seatunnel.connectors.seatunnel.common.source.reader.synchronization.FutureCompletingBlockingQueue;
 import org.apache.seatunnel.connectors.seatunnel.kafka.source.fetch.KafkaSourceFetcherManager;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -39,7 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -59,7 +61,8 @@ public class KafkaSourceReader
     private final ConcurrentMap<TopicPartition, OffsetAndMetadata> offsetsOfFinishedSplits;
 
     KafkaSourceReader(
-            BlockingQueue<RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>>> elementsQueue,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<ConsumerRecord<byte[], byte[]>>>
+                    elementsQueue,
             SingleThreadFetcherManager<ConsumerRecord<byte[], byte[]>, KafkaSourceSplit>
                     splitFetcherManager,
             RecordEmitter<ConsumerRecord<byte[], byte[]>, SeaTunnelRow, KafkaSourceSplitState>
@@ -98,6 +101,18 @@ public class KafkaSourceReader
     @Override
     protected KafkaSourceSplit toSplitType(String splitId, KafkaSourceSplitState splitState) {
         return splitState.toKafkaSourceSplit();
+    }
+
+    @Override
+    public CompletableFuture<Void> isAvailable() {
+        return currentFetch != null
+                ? FutureCompletingBlockingQueue.AVAILABLE
+                : elementsQueue.getAvailabilityFuture();
+    }
+
+    @Override
+    public void pollNext(Collector<SeaTunnelRow> output) throws Exception {
+        // Nothing, Kafka use the new interface pollNext2
     }
 
     @Override

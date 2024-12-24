@@ -35,11 +35,12 @@ class AddSplitsTask<SplitT extends SourceSplit> implements SplitFetcherTask {
     private final Map<String, SplitT> assignedSplits;
 
     @Override
-    public void run() {
+    public boolean run() {
         for (SplitT s : splitsToAdd) {
             assignedSplits.put(s.splitId(), s);
         }
         splitReader.handleSplitsChanges(new SplitsAddition<>(splitsToAdd));
+        return true;
     }
 
     @Override

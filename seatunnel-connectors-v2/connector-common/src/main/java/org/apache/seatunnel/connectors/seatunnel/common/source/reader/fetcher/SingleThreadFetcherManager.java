@@ -20,9 +20,9 @@ package org.apache.seatunnel.connectors.seatunnel.common.source.reader.fetcher;
 import org.apache.seatunnel.api.source.SourceSplit;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.RecordsWithSplitIds;
 import org.apache.seatunnel.connectors.seatunnel.common.source.reader.splitreader.SplitReader;
+import org.apache.seatunnel.connectors.seatunnel.common.source.reader.synchronization.FutureCompletingBlockingQueue;
 
 import java.util.Collection;
-import java.util.concurrent.BlockingQueue;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -37,13 +37,13 @@ public class SingleThreadFetcherManager<E, SplitT extends SourceSplit>
         extends SplitFetcherManager<E, SplitT> {
 
     public SingleThreadFetcherManager(
-            BlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
             Supplier<SplitReader<E, SplitT>> splitReaderSupplier) {
         super(elementsQueue, splitReaderSupplier);
     }
 
     public SingleThreadFetcherManager(
-            BlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<E>> elementsQueue,
             Supplier<SplitReader<E, SplitT>> splitReaderSupplier,
             Consumer<Collection<String>> splitFinishedHook) {
         super(elementsQueue, splitReaderSupplier, splitFinishedHook);
