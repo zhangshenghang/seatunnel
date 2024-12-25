@@ -182,8 +182,9 @@ public class JobLogIT extends SeaTunnelEngineContainer {
 
         // Verify JSON response is valid JSON
         Assertions.assertDoesNotThrow(
-                () -> JsonUtils.parseObject(jsonOutput),
-                "JSON format log list interface exception, returned type is not JSON");
+                () -> JsonUtils.parseArray(jsonOutput),
+                "JSON format log list interface exception, returned type is not JSON, content:"
+                        + jsonOutput);
     }
 
     private void assertFileLog() throws IOException, InterruptedException {
