@@ -973,7 +973,7 @@ select
     else 0
   end as c_number_0
 from
-  fake
+  dual
 ```
 
 It is used to determine whether the condition is valid and return different values according to different judgments
@@ -998,8 +998,15 @@ Generate an array.
 
 Example:
 
-select ARRAY('test1','test2','test3') as arrays
+SELECT Array('c_1','c_2') as string_array,
+       Array(1.23,2.34) as double_array,
+       Array(1,2) as int_array,
+       Array(2147483648,2147483649) as long_array,
+       Array(1.23,2147483648) as double_array_1,
+       Array(1.23,2147483648,'c_1') as string_array_1
+FROM fake
 
+notes: Currently only string, double, long, int types are supported
 
 ### LATERAL VIEW 
 #### EXPLODE
@@ -1009,7 +1016,7 @@ OUTER EXPLODE will return NULL, while array is NULL or empty
 EXPLODE(SPLIT(FIELD_NAME,separator))Used to split string type. The first parameter of SPLIT function  is the field name, the second parameter is the separator
 EXPLODE(ARRAY(value1,value2)) Used to custom array type.
 ```
-SELECT * FROM fake 
+SELECT * FROM dual 
 	LATERAL VIEW EXPLODE ( SPLIT ( NAME, ',' ) ) AS NAME 
 	LATERAL VIEW EXPLODE ( SPLIT ( pk_id, ';' ) ) AS pk_id 
 	LATERAL VIEW OUTER EXPLODE ( age ) AS age
