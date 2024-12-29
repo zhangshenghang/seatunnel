@@ -695,4 +695,75 @@ public class EsRestClient implements Closeable {
                                     return fieldType;
                                 }));
     }
+
+    /**
+     * Add a new field to an existing index
+     *
+     * @param index index name
+     * @param fieldTypeDefine field type definition
+     */
+    public void addField(String index, BasicTypeDefine<EsType> fieldTypeDefine) {
+        String endpoint = String.format("/%s/_mapping", index);
+        Request request = new Request("PUT", endpoint);
+
+        // Build mapping JSON for the new field
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode mappingJson = mapper.createObjectNode();
+        ObjectNode propertiesJson = mapper.createObjectNode();
+        ObjectNode fieldJson = mapper.createObjectNode();
+
+        // Set field type
+        fieldJson.put("type", fieldTypeDefine.getNativeType().getType());
+
+        // Add additional options based on field type
+        Map<String, Object> options = fieldTypeDefine.getNativeType().getOptions();
+        if (!options.isEmpty()) {
+            if (fieldTypeDefine.getNativeType().getType().equalsIgnoreCase(DATE)
+                    || fieldTypeDefine.getNativeType().getType().equalsIgnoreCase(DATE_NANOS)) {
+                fieldJson.put("format", options.get("format").toString());
+            } else if (fieldTypeDefine.getNativeType().getType().equalsIgnoreCase(DENSE_VECTOR)) {
+                fieldJson.put("element_type", options.get("element_type").toString());
+            } else if (fieldTypeDefine.getNativeType().getType().equalsIgnoreCase(ALIAS)) {
+                fieldJson.put("path", options.get("path").toString());
+            } else if (fieldTypeDefine
+                    .getNativeType()
+                    .getType()
+                    .equalsIgnoreCase(AGGREGATE_METRIC_DOUBLE)) {
+                ArrayNode metricsArray = mapper.createArrayNode();
+                @SuppressWarnings("unchecked")
+                List<String> metrics = (List<String>) options.get("metrics");
+                metrics.forEach(metricsArray::add);
+                fieldJson.set("metrics", metricsArray);
+            }
+        }
+
+        propertiesJson.set(fieldTypeDefine.getName(), fieldJson);
+        mappingJson.set("properties", propertiesJson);
+
+        request.setJsonEntity(mappingJson.toString());
+
+        try {
+            Response response = restClient.performRequest(request);
+            if (response == null) {
+                throw new ElasticsearchConnectorException(
+                        ElasticsearchConnectorErrorCode.ADD_FIELD_FAILED,
+                        "PUT " + endpoint + " response null");
+            }
+            if (response.getStatusLine().getStatusCode() != HttpStatus.SC_OK) {
+                throw new ElasticsearchConnectorException(
+                        ElasticsearchConnectorErrorCode.ADD_FIELD_FAILED,
+                        String.format(
+                                "PUT %s response status code=%d, response=%s",
+                                endpoint,
+                                response.getStatusLine().getStatusCode(),
+                                EntityUtils.toString(response.getEntity())));
+            }
+        } catch (IOException ex) {
+            throw new ElasticsearchConnectorException(
+                    ElasticsearchConnectorErrorCode.ADD_FIELD_FAILED,
+                    String.format(
+                            "Failed to add field %s to index %s", fieldTypeDefine.getName(), index),
+                    ex);
+        }
+    }
 }
