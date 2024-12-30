@@ -17,38 +17,26 @@
 
 package org.apache.seatunnel.e2e.connector.elasticsearch;
 
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.IOUtils;
-import org.apache.seatunnel.api.configuration.ReadonlyConfig;
-import org.apache.seatunnel.api.table.catalog.TablePath;
-import org.apache.seatunnel.api.table.catalog.exception.DatabaseAlreadyExistException;
-import org.apache.seatunnel.api.table.catalog.exception.DatabaseNotExistException;
-import org.apache.seatunnel.api.table.converter.BasicTypeDefine;
+import org.apache.seatunnel.shade.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.seatunnel.shade.com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.seatunnel.shade.com.google.common.collect.Lists;
+
 import org.apache.seatunnel.common.utils.JsonUtils;
 import org.apache.seatunnel.connectors.seatunnel.cdc.mysql.testutils.MySqlContainer;
 import org.apache.seatunnel.connectors.seatunnel.cdc.mysql.testutils.MySqlVersion;
 import org.apache.seatunnel.connectors.seatunnel.cdc.mysql.testutils.UniqueDatabase;
-import org.apache.seatunnel.connectors.seatunnel.elasticsearch.catalog.ElasticSearchCatalog;
 import org.apache.seatunnel.connectors.seatunnel.elasticsearch.client.EsRestClient;
-import org.apache.seatunnel.connectors.seatunnel.elasticsearch.client.EsType;
-import org.apache.seatunnel.connectors.seatunnel.elasticsearch.dto.BulkResponse;
-import org.apache.seatunnel.connectors.seatunnel.elasticsearch.dto.source.ScrollResult;
 import org.apache.seatunnel.e2e.common.TestResource;
 import org.apache.seatunnel.e2e.common.TestSuiteBase;
 import org.apache.seatunnel.e2e.common.container.ContainerExtendedFactory;
-import org.apache.seatunnel.e2e.common.container.EngineType;
 import org.apache.seatunnel.e2e.common.container.TestContainer;
-import org.apache.seatunnel.e2e.common.junit.DisabledOnContainer;
 import org.apache.seatunnel.e2e.common.junit.TestContainerExtension;
-import org.apache.seatunnel.e2e.common.util.ContainerUtil;
 import org.apache.seatunnel.e2e.common.util.JobIdGenerator;
-import org.apache.seatunnel.shade.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.seatunnel.shade.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.seatunnel.shade.com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.seatunnel.shade.com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.seatunnel.shade.com.google.common.collect.Lists;
-import org.apache.seatunnel.shade.com.google.common.collect.Maps;
-import org.junit.jupiter.api.*;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.TestTemplate;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.elasticsearch.ElasticsearchContainer;
@@ -56,38 +44,19 @@ import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.DockerLoggerFactory;
 
-import java.io.IOException;
-import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
+import lombok.extern.slf4j.Slf4j;
+
 import java.time.Duration;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.LockSupport;
-import java.util.function.Function;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.awaitility.Awaitility.await;
 
 @Slf4j
-@DisabledOnContainer(
-        value = {},
-        type = {EngineType.SPARK, EngineType.FLINK},
-        disabledReason =
-                "Currently SPARK do not support cdc. In addition, currently only the zeta engine supports schema evolution for pr https://github.com/apache/seatunnel/pull/5125.")
 public class ElasticsearchSchemaChangeIT extends TestSuiteBase implements TestResource {
-
-    private static final long INDEX_REFRESH_MILL_DELAY = 5000L;
-
-    private List<String> testDataset1;
-
-    private List<String> testDataset2;
 
     private ElasticsearchContainer container;
 
@@ -96,9 +65,8 @@ public class ElasticsearchSchemaChangeIT extends TestSuiteBase implements TestRe
     private static final String MYSQL_USER_NAME = "mysqluser";
     private static final String MYSQL_USER_PASSWORD = "mysqlpw";
     private static final String DATABASE = "shop";
-    protected static final String DRIVER_CLASS = "com.mysql.cj.jdbc.Driver";
     protected static final String DRIVER_JAR =
-            "http://linux.hadoop.wiki/lib/mysql-connector-j-8.0.32.jar";
+            "https://repo1.maven.org/maven2/com/mysql/mysql-connector-j/8.0.32/mysql-connector-j-8.0.32.jar";
     private final UniqueDatabase shopDatabase = new UniqueDatabase(MYSQL_CONTAINER, DATABASE);
 
     private EsRestClient esRestClient;
@@ -106,7 +74,6 @@ public class ElasticsearchSchemaChangeIT extends TestSuiteBase implements TestRe
     @BeforeEach
     @Override
     public void startUp() throws Exception {
-
         container =
                 new ElasticsearchContainer(
                                 DockerImageName.parse("elasticsearch:8.9.0")
@@ -137,7 +104,6 @@ public class ElasticsearchSchemaChangeIT extends TestSuiteBase implements TestRe
 
         Startables.deepStart(Stream.of(MYSQL_CONTAINER)).join();
         shopDatabase.createAndInitialize();
-
     }
 
     @TestContainerExtension
@@ -170,8 +136,7 @@ public class ElasticsearchSchemaChangeIT extends TestSuiteBase implements TestRe
     }
 
     @TestTemplate
-    public void testSchemaChange(TestContainer container)
-            throws InterruptedException {
+    public void testSchemaChange(TestContainer container) throws InterruptedException {
 
         String jobId = String.valueOf(JobIdGenerator.newJobId());
         String jobConfigFile = "/elasticsearch/mysqlcdc_to_elasticsearch_with_schema_change.conf";
@@ -188,26 +153,43 @@ public class ElasticsearchSchemaChangeIT extends TestSuiteBase implements TestRe
         TimeUnit.SECONDS.sleep(20);
         shopDatabase.setTemplateName("add_columns").createAndInitialize();
 
-        await().atMost(120 ,TimeUnit.SECONDS) .pollInterval(3,TimeUnit.SECONDS)
+        await().atMost(120, TimeUnit.SECONDS)
+                .pollInterval(3, TimeUnit.SECONDS)
                 .ignoreExceptions()
-                .untilAsserted(()->
-                {
-                    Container.ExecResult execResult = this.container.execInContainer("bash", "-c", "curl -k -u elastic:elasticsearch https://localhost:9200/schema_change_index/_mapping");
-                    ObjectNode jsonNodes = JsonUtils.parseObject(execResult.getStdout());
-                    JsonNode schemaChangeIndex = jsonNodes.get("schema_change_index").get("mappings").get("properties");
-                    Assertions.assertEquals(schemaChangeIndex.get("add_column1").get("type").asText(),"text");
-                    Assertions.assertEquals(schemaChangeIndex.get("add_column2").get("type").asText(),"integer");
-                    Assertions.assertEquals(schemaChangeIndex.get("add_column3").get("type").asText(),"float");
-                    Assertions.assertEquals(schemaChangeIndex.get("add_column4").get("type").asText(),"date");
-                    Container.ExecResult indexCountResult = this.container.execInContainer("bash", "-c", "curl -k -u elastic:elasticsearch https://127.0.0.1:9200/schema_change_index/_count");
-                    Assertions.assertTrue(indexCountResult.getStdout().contains("\"count\":18"));
-                });
-
+                .untilAsserted(
+                        () -> {
+                            Container.ExecResult execResult =
+                                    this.container.execInContainer(
+                                            "bash",
+                                            "-c",
+                                            "curl -k -u elastic:elasticsearch https://localhost:9200/schema_change_index/_mapping");
+                            ObjectNode jsonNodes = JsonUtils.parseObject(execResult.getStdout());
+                            JsonNode schemaChangeIndex =
+                                    jsonNodes
+                                            .get("schema_change_index")
+                                            .get("mappings")
+                                            .get("properties");
+                            Assertions.assertEquals(
+                                    schemaChangeIndex.get("add_column1").get("type").asText(),
+                                    "text");
+                            Assertions.assertEquals(
+                                    schemaChangeIndex.get("add_column2").get("type").asText(),
+                                    "integer");
+                            Assertions.assertEquals(
+                                    schemaChangeIndex.get("add_column3").get("type").asText(),
+                                    "float");
+                            Assertions.assertEquals(
+                                    schemaChangeIndex.get("add_column4").get("type").asText(),
+                                    "date");
+                            Container.ExecResult indexCountResult =
+                                    this.container.execInContainer(
+                                            "bash",
+                                            "-c",
+                                            "curl -k -u elastic:elasticsearch https://127.0.0.1:9200/schema_change_index/_count");
+                            Assertions.assertTrue(
+                                    indexCountResult.getStdout().contains("\"count\":18"));
+                        });
     }
-
-
-
-
 
     @AfterEach
     @Override
@@ -217,6 +199,4 @@ public class ElasticsearchSchemaChangeIT extends TestSuiteBase implements TestRe
         }
         container.close();
     }
-
-
 }
