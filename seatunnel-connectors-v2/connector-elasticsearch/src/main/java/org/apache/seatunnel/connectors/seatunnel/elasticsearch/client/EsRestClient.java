@@ -85,6 +85,8 @@ public class EsRestClient implements Closeable {
 
     private final RestClient restClient;
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     private EsRestClient(RestClient restClient) {
         this.restClient = restClient;
     }
@@ -215,9 +217,8 @@ public class EsRestClient implements Closeable {
                         "bulk es Response is null");
             }
             if (response.getStatusLine().getStatusCode() == HttpStatus.SC_OK) {
-                ObjectMapper objectMapper = new ObjectMapper();
                 String entity = EntityUtils.toString(response.getEntity());
-                JsonNode json = objectMapper.readTree(entity);
+                JsonNode json = OBJECT_MAPPER.readTree(entity);
                 int took = json.get("took").asInt();
                 boolean errors = json.get("errors").asBoolean();
                 return new BulkResponse(errors, took, entity);
@@ -244,8 +245,7 @@ public class EsRestClient implements Closeable {
         try {
             Response response = restClient.performRequest(request);
             String result = EntityUtils.toString(response.getEntity());
-            ObjectMapper objectMapper = new ObjectMapper();
-            JsonNode jsonNode = objectMapper.readTree(result);
+            JsonNode jsonNode = OBJECT_MAPPER.readTree(result);
             JsonNode versionNode = jsonNode.get("version");
             return ElasticsearchClusterInfo.builder()
                     .clusterVersion(versionNode.get("number").asText())
@@ -707,10 +707,9 @@ public class EsRestClient implements Closeable {
         Request request = new Request("PUT", endpoint);
 
         // Build mapping JSON for the new field
-        ObjectMapper mapper = new ObjectMapper();
-        ObjectNode mappingJson = mapper.createObjectNode();
-        ObjectNode propertiesJson = mapper.createObjectNode();
-        ObjectNode fieldJson = mapper.createObjectNode();
+        ObjectNode mappingJson = OBJECT_MAPPER.createObjectNode();
+        ObjectNode propertiesJson = OBJECT_MAPPER.createObjectNode();
+        ObjectNode fieldJson = OBJECT_MAPPER.createObjectNode();
 
         // Set field type
         fieldJson.put("type", fieldTypeDefine.getNativeType().getType());
@@ -729,7 +728,7 @@ public class EsRestClient implements Closeable {
                     .getNativeType()
                     .getType()
                     .equalsIgnoreCase(AGGREGATE_METRIC_DOUBLE)) {
-                ArrayNode metricsArray = mapper.createArrayNode();
+                ArrayNode metricsArray = OBJECT_MAPPER.createArrayNode();
                 @SuppressWarnings("unchecked")
                 List<String> metrics = (List<String>) options.get("metrics");
                 metrics.forEach(metricsArray::add);
