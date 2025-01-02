@@ -82,7 +82,7 @@ public class ElasticsearchSinkWriter
         this.context = context;
         this.maxBatchSize = maxBatchSize;
 
-        this.indexInfo = new IndexInfo(catalogTable.getTableId().getTableName(), config);
+        this.indexInfo = new IndexInfo(catalogTable.getTableId().getTableName().toLowerCase(), config);
         esRestClient = EsRestClient.createInstance(config);
         this.seaTunnelRowSerializer =
                 new ElasticsearchRowSerializer(
