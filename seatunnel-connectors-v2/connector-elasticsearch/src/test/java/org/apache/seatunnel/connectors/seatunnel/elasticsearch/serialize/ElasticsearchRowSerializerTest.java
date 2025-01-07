@@ -231,10 +231,8 @@ public class ElasticsearchRowSerializerTest {
         LocalDateTime expected =
                 isMillis
                         ? LocalDateTime.ofInstant(
-                                        Instant.ofEpochMilli(dateValue.longValue()), ZoneOffset.UTC)
-                                .plusHours(8)
-                        : LocalDateTime.ofEpochSecond(dateValue.longValue(), 0, ZoneOffset.UTC)
-                                .plusHours(8);
+                                Instant.ofEpochMilli(dateValue.longValue()), ZoneOffset.UTC)
+                        : LocalDateTime.ofEpochSecond(dateValue.longValue(), 0, ZoneOffset.UTC);
 
         Assertions.assertEquals(expected, field);
     }
