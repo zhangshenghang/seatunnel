@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.connectors.seatunnel.cdc.mysql.source;
 
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.configuration.util.OptionRule;
 import org.apache.seatunnel.api.source.SeaTunnelSource;
 import org.apache.seatunnel.api.source.SourceSplit;
@@ -38,12 +39,14 @@ import org.apache.seatunnel.connectors.seatunnel.cdc.mysql.config.MySqlSourceCon
 import org.apache.seatunnel.connectors.seatunnel.jdbc.catalog.JdbcCatalogOptions;
 
 import com.google.auto.service.AutoService;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.Serializable;
 import java.util.List;
 import java.util.Optional;
 
 @AutoService(Factory.class)
+@Slf4j
 public class MySqlIncrementalSourceFactory extends BaseChangeStreamTableSourceFactory {
     @Override
     public String factoryIdentifier() {
@@ -69,7 +72,8 @@ public class MySqlIncrementalSourceFactory extends BaseChangeStreamTableSourceFa
                         JdbcSourceOptions.CHUNK_KEY_EVEN_DISTRIBUTION_FACTOR_UPPER_BOUND,
                         JdbcSourceOptions.SAMPLE_SHARDING_THRESHOLD,
                         JdbcSourceOptions.INVERSE_SAMPLING_RATE,
-                        JdbcSourceOptions.TABLE_NAMES_CONFIG)
+                        JdbcSourceOptions.TABLE_NAMES_CONFIG,
+                        JdbcSourceOptions.SCHEMA_CHANGES_ENABLED)
                 .optional(MySqlSourceOptions.STARTUP_MODE, MySqlSourceOptions.STOP_MODE)
                 .conditional(
                         MySqlSourceOptions.STARTUP_MODE,
@@ -98,20 +102,30 @@ public class MySqlIncrementalSourceFactory extends BaseChangeStreamTableSourceFa
             TableSource<T, SplitT, StateT> restoreSource(
                     TableSourceFactoryContext context, List<CatalogTable> restoreTables) {
         return () -> {
+            ReadonlyConfig config = context.getOptions();
             List<CatalogTable> catalogTables =
-                    CatalogTableUtil.getCatalogTables(
-                            context.getOptions(), context.getClassLoader());
+                    CatalogTableUtil.getCatalogTables(config, context.getClassLoader());
             boolean enableSchemaChange =
                     context.getOptions()
-                            .getOptional(SourceOptions.DEBEZIUM_PROPERTIES)
-                            .map(
-                                    e ->
-                                            e.getOrDefault(
-                                                    MySqlSourceConfigFactory.SCHEMA_CHANGE_KEY,
-                                                    MySqlSourceConfigFactory.SCHEMA_CHANGE_DEFAULT
-                                                            .toString()))
-                            .map(Boolean::parseBoolean)
-                            .orElse(MySqlSourceConfigFactory.SCHEMA_CHANGE_DEFAULT);
+                            .getOptional(SourceOptions.SCHEMA_CHANGES_ENABLED)
+                            .orElse(
+                                    // TODO remove this after all users used the new schema change
+                                    // option
+                                    context.getOptions()
+                                            .getOptional(SourceOptions.DEBEZIUM_PROPERTIES)
+                                            .map(
+                                                    e ->
+                                                            e.getOrDefault(
+                                                                    MySqlSourceConfigFactory
+                                                                            .SCHEMA_CHANGE_KEY,
+                                                                    SourceOptions
+                                                                            .SCHEMA_CHANGES_ENABLED
+                                                                            .defaultValue()
+                                                                            .toString()))
+                                            .map(Boolean::parseBoolean)
+                                            .orElse(
+                                                    SourceOptions.SCHEMA_CHANGES_ENABLED
+                                                            .defaultValue()));
             if (!restoreTables.isEmpty() && enableSchemaChange) {
                 catalogTables = mergeTableStruct(catalogTables, restoreTables);
             }
@@ -126,7 +140,7 @@ public class MySqlIncrementalSourceFactory extends BaseChangeStreamTableSourceFa
                                 text -> TablePath.of(text, false));
             }
             return (SeaTunnelSource<T, SplitT, StateT>)
-                    new MySqlIncrementalSource<>(context.getOptions(), catalogTables);
+                    new MySqlIncrementalSource<>(config, catalogTables);
         };
     }
 }
