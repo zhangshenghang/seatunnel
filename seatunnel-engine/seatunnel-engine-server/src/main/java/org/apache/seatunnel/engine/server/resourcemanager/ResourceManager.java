@@ -27,7 +27,6 @@ import com.hazelcast.internal.services.MembershipServiceEvent;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
 
 public interface ResourceManager {
