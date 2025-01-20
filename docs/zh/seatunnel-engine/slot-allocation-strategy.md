@@ -14,12 +14,6 @@ Slot分配策略是SeaTunnel Engine的一个重要组成部分，它决定了Sea
 ```yaml
 seatunnel:
   engine:
-    classloader-cache-mode: true
-    history-job-expire-minutes: 1440
-    backup-count: 1
-    queue-type: blockingqueue
-    print-execution-info-interval: 60
-    print-job-metrics-info-interval: 60
     slot-service:
       slot-allocation-strategy: RANDOM
 ...

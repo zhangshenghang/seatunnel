@@ -11,12 +11,6 @@ Example:
 ```yaml
 seatunnel:
   engine:
-    classloader-cache-mode: true
-    history-job-expire-minutes: 1440
-    backup-count: 1
-    queue-type: blockingqueue
-    print-execution-info-interval: 60
-    print-job-metrics-info-interval: 60
     slot-service:
       slot-allocation-strategy: RANDOM
 ```
