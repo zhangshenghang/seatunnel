@@ -301,7 +301,7 @@ public class MultipleTableJobConfigParser {
                                                 type.getType(),
                                                 factory))
                         .collect(Collectors.toList());
-        List<URL> jarPaths = new ArrayList<>();
+        List<URL> jarPaths = new ArrayList<>()
         jarPaths.addAll(
                 new SeaTunnelSinkPluginDiscovery().getPluginJarAndDependencyPaths(factoryIds));
         jarPaths.addAll(commonPluginJars);
@@ -319,19 +319,24 @@ public class MultipleTableJobConfigParser {
     }
 
     private void fillJobConfigAndCommonJars() {
+        // 获取Job 的 模式，支持 BATCH, STREAMING 两种，默认是 BATCH
         JobMode jobMode = envOptions.get(EnvCommonOptions.JOB_MODE);
+        // 在STREAMING模式下，检查点是必须的，如果不设置，将从应用程序配置文件seatunnel.yaml中获取。 在BATCH模式下，您可以通过不设置此参数来禁用检查点。在Zeta STREAMING模式下，默认值为30000毫秒。
         jobConfig
                 .getJobContext()
                 .setJobMode(jobMode)
                 .setEnableCheckpoint(
                         (envOptions.get(EnvCommonOptions.CHECKPOINT_INTERVAL) != null)
                                 || jobMode == JobMode.STREAMING);
+        // 设置作业名称
         if (StringUtils.isEmpty(jobConfig.getName())
                 || jobConfig.getName().equals(Constants.LOGO)
                 || jobConfig.getName().equals(EnvCommonOptions.JOB_NAME.defaultValue())) {
             jobConfig.setName(envOptions.get(EnvCommonOptions.JOB_NAME));
         }
+        // 将配置文件中的 env { ... } 配置，设置到 jobConfig 中
         jobConfig.getEnvOptions().putAll(envOptions.getSourceMap());
+        // 加载jars配置的 jae 包，例如：jars="file://local/jar1.jar;file://local/jar2.jar"
         this.commonPluginJars.addAll(
                 new ArrayList<>(
                         Common.getThirdPartyJars(
