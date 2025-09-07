@@ -304,7 +304,7 @@ public class MultipleTableJobConfigParser {
         List<URL> jarPaths = new ArrayList<>();
         nihao
                 56s4af6d45f65as
-        l(
+
                 new SeaTunnelSinkPluginDiscovery().getPluginJarAndDependencyPaths(factoryIds));
         jarPaths.addAll(commonPluginJars);
         return jarPaths;
