@@ -22,6 +22,7 @@ import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
 import org.apache.seatunnel.connectors.seatunnel.kafka.config.MessageFormat;
+import org.apache.seatunnel.connectors.seatunnel.kafka.exception.KafkaConnectorException;
 import org.apache.seatunnel.format.compatible.debezium.json.CompatibleDebeziumJsonDeserializationSchema;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -64,5 +65,27 @@ public class DefaultSeaTunnelRowSerializerTest {
         Assertions.assertEquals("test_topic", record.topic());
         Assertions.assertEquals("key1", new String(record.key()));
         Assertions.assertEquals("value1", new String(record.value()));
+    }
+
+    @Test
+    public void testMultipleTopicConfiguration() {
+        SeaTunnelRowType rowType =
+                CompatibleDebeziumJsonDeserializationSchema.DEBEZIUM_DATA_ROW_TYPE;
+        MessageFormat format = MessageFormat.COMPATIBLE_DEBEZIUM_JSON;
+        ReadonlyConfig pluginConfig = ReadonlyConfig.fromMap(Collections.emptyMap());
+
+        // The multi-topic configuration should be capable of matching the target topics in CDC events
+        DefaultSeaTunnelRowSerializer serializer =
+                DefaultSeaTunnelRowSerializer.create(
+                        "topic_a, topic_b", rowType, format, null, pluginConfig);
+
+        SeaTunnelRow validRow = new SeaTunnelRow(new Object[] {"topic_b", "key", "value"});
+        ProducerRecord<byte[], byte[]> record = serializer.serializeRow(validRow);
+        Assertions.assertEquals("topic_b", record.topic());
+
+        SeaTunnelRow invalidRow = new SeaTunnelRow(new Object[] {"topic_c", "key", "value"});
+        // Topics outside of the configuration must throw an error notification
+        Assertions.assertThrows(
+                KafkaConnectorException.class, () -> serializer.serializeRow(invalidRow));
     }
 }

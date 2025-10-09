@@ -46,7 +46,9 @@ import org.apache.kafka.common.header.internals.RecordHeaders;
 import lombok.RequiredArgsConstructor;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -184,12 +186,31 @@ public class DefaultSeaTunnelRowSerializer implements SeaTunnelRowSerializer {
 
     private static Function<SeaTunnelRow, String> topicExtractor(
             String topic, SeaTunnelRowType rowType, MessageFormat format) {
+        List<String> configuredTopics = parseConfiguredTopics(topic);
+
         if ((MessageFormat.COMPATIBLE_DEBEZIUM_JSON.equals(format)
                         || MessageFormat.NATIVE.equals(format))
-                && topic == null) {
+                && (topic == null || !configuredTopics.isEmpty())) {
             int topicFieldIndex =
                     rowType.indexOf(CompatibleDebeziumJsonDeserializationSchema.FIELD_TOPIC);
-            return row -> row.getField(topicFieldIndex).toString();
+            List<String> expectedTopics = configuredTopics;
+            return row -> {
+                Object topicFieldValue = row.getField(topicFieldIndex);
+                if (topicFieldValue == null) {
+                    throw new KafkaConnectorException(
+                            CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT,
+                            "The column value is empty!");
+                }
+                String actualTopic = topicFieldValue.toString();
+                if (!expectedTopics.isEmpty() && !expectedTopics.contains(actualTopic)) {
+                    throw new KafkaConnectorException(
+                            CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT,
+                            String.format(
+                                    "Topic %s is not found in configured topic list %s",
+                                    actualTopic, expectedTopics));
+                }
+                return actualTopic;
+            };
         }
 
         String regex = "\\$\\{(.*?)\\}";
@@ -325,6 +346,20 @@ public class DefaultSeaTunnelRowSerializer implements SeaTunnelRowSerializer {
                         CommonErrorCodeDeprecated.UNSUPPORTED_DATA_TYPE,
                         "Unsupported format: " + format);
         }
+    }
+
+    private static List<String> parseConfiguredTopics(String topic) {
+        if (topic == null || !topic.contains(",")) {
+            return Collections.emptyList();
+        }
+        List<String> topics = new ArrayList<>();
+        for (String candidate : topic.split(",")) {
+            String normalized = candidate.trim();
+            if (!normalized.isEmpty()) {
+                topics.add(normalized);
+            }
+        }
+        return topics;
     }
 
     private static Iterable<Header> convertToKafkaHeaders(Map<String, String> headersMap) {
