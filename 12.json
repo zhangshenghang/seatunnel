@@ -1,0 +1,776 @@
+{
+  "pipeline" : {
+    "jobId" : "1032117608691793921",
+    "pipelineId" : 1,
+    "checkpointId" : 19
+  },
+  "checkpoint" : {
+    "jobId" : 1032117608691793921,
+    "pipelineId" : 1,
+    "checkpointId" : 19,
+    "triggerTimestamp" : 1760841955127,
+    "checkpointType" : "CHECKPOINT_TYPE",
+    "completedTimestamp" : 1760841955128,
+    "restored" : false,
+    "taskStates" : [ {
+      "stateKey" : "ActionStateKey - pipeline-1 [Sink[0]-Kafka-mysql_cdc.mysql_cdc_e2e_sink_table222]",
+      "parallelism" : 1,
+      "coordinatorState" : null,
+      "subtaskStates" : [ {
+        "stateKey" : "ActionStateKey - pipeline-1 [Sink[0]-Kafka-mysql_cdc.mysql_cdc_e2e_sink_table222]",
+        "index" : 0,
+        "states" : [ ]
+      } ]
+    }, {
+      "stateKey" : "ActionStateKey - pipeline-1 [Source[0]-MySQL-CDC]",
+      "parallelism" : 1,
+      "coordinatorState" : {
+        "stateKey" : "ActionStateKey - pipeline-1 [Source[0]-MySQL-CDC]",
+        "index" : -1,
+        "states" : [ {
+          "className" : "org.apache.seatunnel.connectors.cdc.base.source.enumerator.state.HybridPendingSplitsState",
+          "object" : {
+            "incrementalPhaseState" : { },
+            "snapshotPhaseState" : {
+              "alreadyProcessedTables" : [ {
+                "catalogName" : "mysql_cdc",
+                "id" : "mysql_cdc.mysql_cdc_e2e_sink_table222",
+                "schemaName" : null,
+                "tableName" : "mysql_cdc_e2e_sink_table222"
+              } ],
+              "assignedSplits" : { },
+              "isAssignerCompleted" : true,
+              "isRemainingTablesCheckpointed" : true,
+              "isTableIdCaseSensitive" : true,
+              "remainingSplits" : [ ],
+              "remainingTables" : [ ],
+              "splitCompletedOffsets" : { }
+            }
+          },
+          "base64" : "rO0ABXNyAFlvcmcuYXBhY2hlLnNlYXR1bm5lbC5jb25uZWN0b3JzLmNkYy5iYXNlLnNvdXJjZS5lbnVtZXJhdG9yLnN0YXRlLkh5YnJpZFBlbmRpbmdTcGxpdHNTdGF0ZenfyYqRFMnzAgACTAAVaW5jcmVtZW50YWxQaGFzZVN0YXRldABYTG9yZy9hcGFjaGUvc2VhdHVubmVsL2Nvbm5lY3RvcnMvY2RjL2Jhc2Uvc291cmNlL2VudW1lcmF0b3Ivc3RhdGUvSW5jcmVtZW50YWxQaGFzZVN0YXRlO0wAEnNuYXBzaG90UGhhc2VTdGF0ZXQAVUxvcmcvYXBhY2hlL3NlYXR1bm5lbC9jb25uZWN0b3JzL2NkYy9iYXNlL3NvdXJjZS9lbnVtZXJhdG9yL3N0YXRlL1NuYXBzaG90UGhhc2VTdGF0ZTt4cHNyAFZvcmcuYXBhY2hlLnNlYXR1bm5lbC5jb25uZWN0b3JzLmNkYy5iYXNlLnNvdXJjZS5lbnVtZXJhdG9yLnN0YXRlLkluY3JlbWVudGFsUGhhc2VTdGF0ZaGBejCi10WkAgAAeHBzcgBTb3JnLmFwYWNoZS5zZWF0dW5uZWwuY29ubmVjdG9ycy5jZGMuYmFzZS5zb3VyY2UuZW51bWVyYXRvci5zdGF0ZS5TbmFwc2hvdFBoYXNlU3RhdGWQ+qBoNYmn7AIACFoAE2lzQXNzaWduZXJDb21wbGV0ZWRaAB1pc1JlbWFpbmluZ1RhYmxlc0NoZWNrcG9pbnRlZFoAFmlzVGFibGVJZENhc2VTZW5zaXRpdmVMABZhbHJlYWR5UHJvY2Vzc2VkVGFibGVzdAAQTGphdmEvdXRpbC9MaXN0O0wADmFzc2lnbmVkU3BsaXRzdAAPTGphdmEvdXRpbC9NYXA7TAAPcmVtYWluaW5nU3BsaXRzcQB+AAdMAA9yZW1haW5pbmdUYWJsZXNxAH4AB0wAFXNwbGl0Q29tcGxldGVkT2Zmc2V0c3EAfgAIeHABAQFzcgAmamF2YS51dGlsLkNvbGxlY3Rpb25zJFN5bmNocm9uaXplZExpc3SUY+/jg0QQfAIAAUwABGxpc3RxAH4AB3hyACxqYXZhLnV0aWwuQ29sbGVjdGlvbnMkU3luY2hyb25pemVkQ29sbGVjdGlvbiph+E0JnJm1AwACTAABY3QAFkxqYXZhL3V0aWwvQ29sbGVjdGlvbjtMAAVtdXRleHQAEkxqYXZhL2xhbmcvT2JqZWN0O3hwc3IAE2phdmEudXRpbC5BcnJheUxpc3R4gdIdmcdhnQMAAUkABHNpemV4cAAAAAF3BAAAAAFzcgAeaW8uZGViZXppdW0ucmVsYXRpb25hbC5UYWJsZUlkAAAAAAAAAAECAARMAAtjYXRhbG9nTmFtZXQAEkxqYXZhL2xhbmcvU3RyaW5nO0wAAmlkcQB+ABJMAApzY2hlbWFOYW1lcQB+ABJMAAl0YWJsZU5hbWVxAH4AEnhwdAAJbXlzcWxfY2RjdAAlbXlzcWxfY2RjLm15c3FsX2NkY19lMmVfc2lua190YWJsZTIyMnB0ABtteXNxbF9jZGNfZTJlX3NpbmtfdGFibGUyMjJ4cQB+AA54cQB+ABBzcgAmamF2YS51dGlsLmNvbmN1cnJlbnQuQ29uY3VycmVudEhhc2hNYXBkmd4SnYcpPQMAA0kAC3NlZ21lbnRNYXNrSQAMc2VnbWVudFNoaWZ0WwAIc2VnbWVudHN0ADFbTGphdmEvdXRpbC9jb25jdXJyZW50L0NvbmN1cnJlbnRIYXNoTWFwJFNlZ21lbnQ7eHAAAAAPAAAAHHVyADFbTGphdmEudXRpbC5jb25jdXJyZW50LkNvbmN1cnJlbnRIYXNoTWFwJFNlZ21lbnQ7Unc/QTKbOXQCAAB4cAAAABBzcgAuamF2YS51dGlsLmNvbmN1cnJlbnQuQ29uY3VycmVudEhhc2hNYXAkU2VnbWVudB82TJBYkyk9AgABRgAKbG9hZEZhY3RvcnhyAChqYXZhLnV0aWwuY29uY3VycmVudC5sb2Nrcy5SZWVudHJhbnRMb2NrZlWoLCzIausCAAFMAARzeW5jdAAvTGphdmEvdXRpbC9jb25jdXJyZW50L2xvY2tzL1JlZW50cmFudExvY2skU3luYzt4cHNyADRqYXZhLnV0aWwuY29uY3VycmVudC5sb2Nrcy5SZWVudHJhbnRMb2NrJE5vbmZhaXJTeW5jZYgy51N7vwsCAAB4cgAtamF2YS51dGlsLmNvbmN1cnJlbnQubG9ja3MuUmVlbnRyYW50TG9jayRTeW5juB6ilKpEWnwCAAB4cgA1amF2YS51dGlsLmNvbmN1cnJlbnQubG9ja3MuQWJzdHJhY3RRdWV1ZWRTeW5jaHJvbml6ZXJmVahDdT9S4wIAAUkABXN0YXRleHIANmphdmEudXRpbC5jb25jdXJyZW50LmxvY2tzLkFic3RyYWN0T3duYWJsZVN5bmNocm9uaXplcjPfr7mtbW+pAgAAeHAAAAAAP0AAAHNxAH4AHHNxAH4AIAAAAAA/QAAAc3EAfgAcc3EAfgAgAAAAAD9AAABzcQB+ABxzcQB+ACAAAAAAP0AAAHNxAH4AHHNxAH4AIAAAAAA/QAAAc3EAfgAcc3EAfgAgAAAAAD9AAABzcQB+ABxzcQB+ACAAAAAAP0AAAHNxAH4AHHNxAH4AIAAAAAA/QAAAc3EAfgAcc3EAfgAgAAAAAD9AAABzcQB+ABxzcQB+ACAAAAAAP0AAAHNxAH4AHHNxAH4AIAAAAAA/QAAAc3EAfgAcc3EAfgAgAAAAAD9AAABzcQB+ABxzcQB+ACAAAAAAP0AAAHNxAH4AHHNxAH4AIAAAAAA/QAAAc3EAfgAcc3EAfgAgAAAAAD9AAABzcQB+ABxzcQB+ACAAAAAAP0AAAHBweHNxAH4ADwAAAAB3BAAAAAB4c3EAfgAPAAAAAHcEAAAAAHhzcQB+ABcAAAAPAAAAHHVxAH4AGgAAABBzcQB+ABxzcQB+ACAAAAAAP0AAAHNxAH4AHHNxAH4AIAAAAAA/QAAAc3EAfgAcc3EAfgAgAAAAAD9AAABzcQB+ABxzcQB+ACAAAAAAP0AAAHNxAH4AHHNxAH4AIAAAAAA/QAAAc3EAfgAcc3EAfgAgAAAAAD9AAABzcQB+ABxzcQB+ACAAAAAAP0AAAHNxAH4AHHNxAH4AIAAAAAA/QAAAc3EAfgAcc3EAfgAgAAAAAD9AAABzcQB+ABxzcQB+ACAAAAAAP0AAAHNxAH4AHHNxAH4AIAAAAAA/QAAAc3EAfgAcc3EAfgAgAAAAAD9AAABzcQB+ABxzcQB+ACAAAAAAP0AAAHNxAH4AHHNxAH4AIAAAAAA/QAAAc3EAfgAcc3EAfgAgAAAAAD9AAABzcQB+ABxzcQB+ACAAAAAAP0AAAHBweA==",
+          "error" : "Binary state preserved; class org.apache.seatunnel.connectors.cdc.base.source.enumerator.state.HybridPendingSplitsState lacks editable constructor"
+        } ]
+      },
+      "subtaskStates" : [ {
+        "stateKey" : "ActionStateKey - pipeline-1 [Source[0]-MySQL-CDC]",
+        "index" : 0,
+        "states" : [ {
+          "className" : "org.apache.seatunnel.connectors.cdc.base.source.split.IncrementalSplit",
+          "object" : {
+            "checkpointDataType" : null,
+            "checkpointTables" : [ {
+              "catalogName" : "MySQL",
+              "comment" : "测试表1",
+              "metadata" : {
+                "columnNames" : [ "EventTime", "Delay" ],
+                "columns" : [ {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : null,
+                  "dataType" : {
+                    "sqlType" : "BIGINT",
+                    "typeClass" : "java.lang.Long"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "EventTime",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : null
+                }, {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : null,
+                  "dataType" : {
+                    "sqlType" : "BIGINT",
+                    "typeClass" : "java.lang.Long"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "Delay",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : null
+                } ]
+              },
+              "options" : {
+                "connector" : "jdbc",
+                "table-name" : "mysql_cdc.mysql_cdc_e2e_sink_table222",
+                "url" : "jdbc:mysql://localhost:3306/mysql_cdc"
+              },
+              "partitionKeys" : [ ],
+              "tableId" : {
+                "catalogName" : "MySQL",
+                "databaseName" : "mysql_cdc",
+                "schemaName" : null,
+                "tableName" : "mysql_cdc_e2e_sink_table222"
+              },
+              "tableSchema" : {
+                "columnNames" : [ "id", "smallint_col", "integer_col", "bigint_col", "decimal_col", "numeric_col", "real_col", "double_col", "smallserial_col", "serial_col", "bigserial_col", "varchar_col", "date_col", "timestamp_col" ],
+                "columns" : [ {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : "",
+                  "dataType" : {
+                    "sqlType" : "INT",
+                    "typeClass" : "java.lang.Integer"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "id",
+                  "nullable" : false,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : "int"
+                }, {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : "字段测试",
+                  "dataType" : {
+                    "sqlType" : "SMALLINT",
+                    "typeClass" : "java.lang.Short"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "smallint_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : "smallint"
+                }, {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : "",
+                  "dataType" : {
+                    "sqlType" : "INT",
+                    "typeClass" : "java.lang.Integer"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "integer_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : "int"
+                }, {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : "",
+                  "dataType" : {
+                    "sqlType" : "BIGINT",
+                    "typeClass" : "java.lang.Long"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "bigint_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : "bigint"
+                }, {
+                  "bitLen" : 80,
+                  "columnLength" : 10,
+                  "comment" : "",
+                  "dataType" : {
+                    "precision" : 10,
+                    "scale" : 2,
+                    "sqlType" : "DECIMAL",
+                    "typeClass" : "java.math.BigDecimal"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : 10,
+                  "name" : "decimal_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : 2,
+                  "sinkType" : null,
+                  "sourceType" : "decimal(10,2)"
+                }, {
+                  "bitLen" : 80,
+                  "columnLength" : 10,
+                  "comment" : "",
+                  "dataType" : {
+                    "precision" : 10,
+                    "scale" : 2,
+                    "sqlType" : "DECIMAL",
+                    "typeClass" : "java.math.BigDecimal"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : 10,
+                  "name" : "numeric_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : 2,
+                  "sinkType" : null,
+                  "sourceType" : "decimal(10,2)"
+                }, {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : "",
+                  "dataType" : {
+                    "sqlType" : "FLOAT",
+                    "typeClass" : "java.lang.Float"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "real_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : "float"
+                }, {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : "",
+                  "dataType" : {
+                    "sqlType" : "DOUBLE",
+                    "typeClass" : "java.lang.Double"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "double_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : "double"
+                }, {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : "",
+                  "dataType" : {
+                    "sqlType" : "SMALLINT",
+                    "typeClass" : "java.lang.Short"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "smallserial_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : "smallint"
+                }, {
+                  "bitLen" : 8160,
+                  "columnLength" : 1020,
+                  "comment" : "",
+                  "dataType" : {
+                    "sqlType" : "STRING",
+                    "typeClass" : "java.lang.String"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : 1020,
+                  "name" : "serial_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : "varchar(255)"
+                }, {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : "",
+                  "dataType" : {
+                    "sqlType" : "BIGINT",
+                    "typeClass" : "java.lang.Long"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "bigserial_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : "bigint"
+                }, {
+                  "bitLen" : 1600,
+                  "columnLength" : 200,
+                  "comment" : "",
+                  "dataType" : {
+                    "sqlType" : "STRING",
+                    "typeClass" : "java.lang.String"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : 200,
+                  "name" : "varchar_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : "varchar(50)"
+                }, {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : "",
+                  "dataType" : {
+                    "sqlType" : "DATE",
+                    "typeClass" : "java.time.LocalDate"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "date_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : null,
+                  "sinkType" : null,
+                  "sourceType" : "date"
+                }, {
+                  "bitLen" : 0,
+                  "columnLength" : null,
+                  "comment" : "",
+                  "dataType" : {
+                    "sqlType" : "TIMESTAMP",
+                    "typeClass" : "java.time.LocalDateTime"
+                  },
+                  "defaultValue" : null,
+                  "isUnsigned" : false,
+                  "isZeroFill" : false,
+                  "longColumnLength" : null,
+                  "name" : "timestamp_col",
+                  "nullable" : true,
+                  "options" : null,
+                  "scale" : 0,
+                  "sinkType" : null,
+                  "sourceType" : "datetime"
+                } ],
+                "constraintKeys" : [ ],
+                "primaryKey" : {
+                  "columnNames" : [ "id" ],
+                  "enableAutoId" : null,
+                  "primaryKey" : "PRIMARY"
+                }
+              }
+            } ],
+            "completedSnapshotSplitInfos" : [ ],
+            "historyTableChanges" : {
+              "mysql_cdc.mysql_cdc_e2e_sink_table222" : {
+                "payload" : {
+                  "id" : "\"mysql_cdc\".\"mysql_cdc_e2e_sink_table222\"",
+                  "table" : {
+                    "columns" : [ {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 4,
+                      "length" : null,
+                      "name" : "id",
+                      "nativeType" : null,
+                      "optional" : false,
+                      "position" : 1,
+                      "scale" : null,
+                      "typeExpression" : "INT",
+                      "typeName" : "INT"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 5,
+                      "length" : null,
+                      "name" : "smallint_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 2,
+                      "scale" : null,
+                      "typeExpression" : "SMALLINT",
+                      "typeName" : "SMALLINT"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 4,
+                      "length" : null,
+                      "name" : "integer_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 3,
+                      "scale" : null,
+                      "typeExpression" : "INT",
+                      "typeName" : "INT"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : -5,
+                      "length" : null,
+                      "name" : "bigint_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 4,
+                      "scale" : null,
+                      "typeExpression" : "BIGINT",
+                      "typeName" : "BIGINT"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 3,
+                      "length" : 10,
+                      "name" : "decimal_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 5,
+                      "scale" : 2,
+                      "typeExpression" : "DECIMAL",
+                      "typeName" : "DECIMAL"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 3,
+                      "length" : 10,
+                      "name" : "numeric_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 6,
+                      "scale" : 2,
+                      "typeExpression" : "DECIMAL",
+                      "typeName" : "DECIMAL"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 6,
+                      "length" : null,
+                      "name" : "real_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 7,
+                      "scale" : null,
+                      "typeExpression" : "FLOAT",
+                      "typeName" : "FLOAT"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 8,
+                      "length" : null,
+                      "name" : "double_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 8,
+                      "scale" : null,
+                      "typeExpression" : "DOUBLE",
+                      "typeName" : "DOUBLE"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 5,
+                      "length" : null,
+                      "name" : "smallserial_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 9,
+                      "scale" : null,
+                      "typeExpression" : "SMALLINT",
+                      "typeName" : "SMALLINT"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : "utf8mb4",
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 12,
+                      "length" : 255,
+                      "name" : "serial_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 10,
+                      "scale" : null,
+                      "typeExpression" : "VARCHAR",
+                      "typeName" : "VARCHAR"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : -5,
+                      "length" : null,
+                      "name" : "bigserial_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 11,
+                      "scale" : null,
+                      "typeExpression" : "BIGINT",
+                      "typeName" : "BIGINT"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : "utf8mb4",
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 12,
+                      "length" : 50,
+                      "name" : "varchar_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 12,
+                      "scale" : null,
+                      "typeExpression" : "VARCHAR",
+                      "typeName" : "VARCHAR"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 91,
+                      "length" : null,
+                      "name" : "date_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 13,
+                      "scale" : null,
+                      "typeExpression" : "DATE",
+                      "typeName" : "DATE"
+                    }, {
+                      "autoIncremented" : false,
+                      "charsetName" : null,
+                      "comment" : null,
+                      "enumValues" : [ ],
+                      "generated" : false,
+                      "jdbcType" : 93,
+                      "length" : null,
+                      "name" : "timestamp_col",
+                      "nativeType" : null,
+                      "optional" : true,
+                      "position" : 14,
+                      "scale" : null,
+                      "typeExpression" : "DATETIME",
+                      "typeName" : "DATETIME"
+                    } ],
+                    "comment" : null,
+                    "defaultCharsetName" : "utf8mb4",
+                    "primaryKeyColumnNames" : [ "id" ]
+                  },
+                  "type" : "CREATE"
+                },
+                "schema" : {
+                  "fields" : [ {
+                    "field" : "type",
+                    "optional" : false,
+                    "type" : "string"
+                  }, {
+                    "field" : "id",
+                    "optional" : false,
+                    "type" : "string"
+                  }, {
+                    "field" : "table",
+                    "fields" : [ {
+                      "field" : "defaultCharsetName",
+                      "optional" : true,
+                      "type" : "string"
+                    }, {
+                      "field" : "primaryKeyColumnNames",
+                      "items" : {
+                        "optional" : false,
+                        "type" : "string"
+                      },
+                      "optional" : true,
+                      "type" : "array"
+                    }, {
+                      "field" : "columns",
+                      "items" : {
+                        "fields" : [ {
+                          "field" : "name",
+                          "optional" : false,
+                          "type" : "string"
+                        }, {
+                          "field" : "jdbcType",
+                          "optional" : false,
+                          "type" : "int32"
+                        }, {
+                          "field" : "nativeType",
+                          "optional" : true,
+                          "type" : "int32"
+                        }, {
+                          "field" : "typeName",
+                          "optional" : false,
+                          "type" : "string"
+                        }, {
+                          "field" : "typeExpression",
+                          "optional" : true,
+                          "type" : "string"
+                        }, {
+                          "field" : "charsetName",
+                          "optional" : true,
+                          "type" : "string"
+                        }, {
+                          "field" : "length",
+                          "optional" : true,
+                          "type" : "int32"
+                        }, {
+                          "field" : "scale",
+                          "optional" : true,
+                          "type" : "int32"
+                        }, {
+                          "field" : "position",
+                          "optional" : false,
+                          "type" : "int32"
+                        }, {
+                          "field" : "optional",
+                          "optional" : true,
+                          "type" : "boolean"
+                        }, {
+                          "field" : "autoIncremented",
+                          "optional" : true,
+                          "type" : "boolean"
+                        }, {
+                          "field" : "generated",
+                          "optional" : true,
+                          "type" : "boolean"
+                        }, {
+                          "field" : "comment",
+                          "optional" : true,
+                          "type" : "string"
+                        }, {
+                          "field" : "enumValues",
+                          "items" : {
+                            "optional" : false,
+                            "type" : "string"
+                          },
+                          "optional" : true,
+                          "type" : "array"
+                        } ],
+                        "name" : "io.debezium.connector.schema.Column",
+                        "optional" : false,
+                        "type" : "struct"
+                      },
+                      "optional" : false,
+                      "type" : "array"
+                    }, {
+                      "field" : "comment",
+                      "optional" : true,
+                      "type" : "string"
+                    } ],
+                    "name" : "io.debezium.connector.schema.Table",
+                    "optional" : false,
+                    "type" : "struct"
+                  } ],
+                  "name" : "io.debezium.connector.schema.Change",
+                  "optional" : false,
+                  "type" : "struct"
+                }
+              }
+            },
+            "splitId" : "incremental-split-0",
+            "startupOffset" : {
+              "offset" : {
+                "file" : "binlog.000007",
+                "pos" : "15109",
+                "server_id" : "1",
+                "transaction_id" : null
+              }
+            },
+            "stopOffset" : {
+              "offset" : {
+                "event" : "0",
+                "file" : "",
+                "pos" : "-9223372036854775808",
+                "row" : "0",
+                "ts_sec" : "0"
+              }
+            },
+            "tableIds" : [ {
+              "catalogName" : "mysql_cdc",
+              "id" : "mysql_cdc.mysql_cdc_e2e_sink_table222",
+              "schemaName" : null,
+              "tableName" : "mysql_cdc_e2e_sink_table222"
+            } ]
+          },
+          "base64" : "rO0ABXNyAEZvcmcuYXBhY2hlLnNlYXR1bm5lbC5jb25uZWN0b3JzLmNkYy5iYXNlLnNvdXJjZS5zcGxpdC5JbmNyZW1lbnRhbFNwbGl0AAAAAAAAAAECAAdMABJjaGVja3BvaW50RGF0YVR5cGV0ADdMb3JnL2FwYWNoZS9zZWF0dW5uZWwvYXBpL3RhYmxlL3R5cGUvU2VhVHVubmVsRGF0YVR5cGU7TAAQY2hlY2twb2ludFRhYmxlc3QAEExqYXZhL3V0aWwvTGlzdDtMABtjb21wbGV0ZWRTbmFwc2hvdFNwbGl0SW5mb3NxAH4AAkwAE2hpc3RvcnlUYWJsZUNoYW5nZXN0AA9MamF2YS91dGlsL01hcDtMAA1zdGFydHVwT2Zmc2V0dAA/TG9yZy9hcGFjaGUvc2VhdHVubmVsL2Nvbm5lY3RvcnMvY2RjL2Jhc2Uvc291cmNlL29mZnNldC9PZmZzZXQ7TAAKc3RvcE9mZnNldHEAfgAETAAIdGFibGVJZHNxAH4AAnhyAEVvcmcuYXBhY2hlLnNlYXR1bm5lbC5jb25uZWN0b3JzLmNkYy5iYXNlLnNvdXJjZS5zcGxpdC5Tb3VyY2VTcGxpdEJhc2VlRZtwzrSAjQIAAUwAB3NwbGl0SWR0ABJMamF2YS9sYW5nL1N0cmluZzt4cHQAE2luY3JlbWVudGFsLXNwbGl0LTBwc3IAE2phdmEudXRpbC5BcnJheUxpc3R4gdIdmcdhnQMAAUkABHNpemV4cAAAAAF3BAAAAAFzcgAzb3JnLmFwYWNoZS5zZWF0dW5uZWwuYXBpLnRhYmxlLmNhdGFsb2cuQ2F0YWxvZ1RhYmxlAAAAAAAAAAECAAdMAAtjYXRhbG9nTmFtZXEAfgAGTAAHY29tbWVudHEAfgAGTAAIbWV0YWRhdGF0ADdMb3JnL2FwYWNoZS9zZWF0dW5uZWwvYXBpL3RhYmxlL2NhdGFsb2cvTWV0YWRhdGFTY2hlbWE7TAAHb3B0aW9uc3EAfgADTAANcGFydGl0aW9uS2V5c3EAfgACTAAHdGFibGVJZHQAOExvcmcvYXBhY2hlL3NlYXR1bm5lbC9hcGkvdGFibGUvY2F0YWxvZy9UYWJsZUlkZW50aWZpZXI7TAALdGFibGVTY2hlbWF0ADRMb3JnL2FwYWNoZS9zZWF0dW5uZWwvYXBpL3RhYmxlL2NhdGFsb2cvVGFibGVTY2hlbWE7eHB0AAVNeVNRTHQACua1i+ivleihqDFzcgA1b3JnLmFwYWNoZS5zZWF0dW5uZWwuYXBpLnRhYmxlLmNhdGFsb2cuTWV0YWRhdGFTY2hlbWEAAAAAAAAAAQIAAHhyADVvcmcuYXBhY2hlLnNlYXR1bm5lbC5hcGkudGFibGUuY2F0YWxvZy5BYnN0cmFjdFNjaGVtYQAAAAAAAAABAgACTAALY29sdW1uTmFtZXNxAH4AAkwAB2NvbHVtbnNxAH4AAnhwc3EAfgAJAAAAAncEAAAAAnQACUV2ZW50VGltZXQABURlbGF5eHNxAH4ACQAAAAJ3BAAAAAJzcgA1b3JnLmFwYWNoZS5zZWF0dW5uZWwuYXBpLnRhYmxlLmNhdGFsb2cuTWV0YWRhdGFDb2x1bW4AAAAAAAAAAQIAAHhyAC1vcmcuYXBhY2hlLnNlYXR1bm5lbC5hcGkudGFibGUuY2F0YWxvZy5Db2x1bW7//////////wIADloACmlzVW5zaWduZWRaAAppc1plcm9GaWxsWgAIbnVsbGFibGVMAAZiaXRMZW50ABBMamF2YS9sYW5nL0xvbmc7TAAMY29sdW1uTGVuZ3RocQB+ABtMAAdjb21tZW50cQB+AAZMAAhkYXRhVHlwZXEAfgABTAAMZGVmYXVsdFZhbHVldAASTGphdmEvbGFuZy9PYmplY3Q7TAAQbG9uZ0NvbHVtbkxlbmd0aHEAfgAbTAAEbmFtZXEAfgAGTAAHb3B0aW9uc3EAfgADTAAFc2NhbGV0ABNMamF2YS9sYW5nL0ludGVnZXI7TAAIc2lua1R5cGVxAH4ABkwACnNvdXJjZVR5cGVxAH4ABnhwAAABc3IADmphdmEubGFuZy5Mb25nO4vkkMyPI98CAAFKAAV2YWx1ZXhyABBqYXZhLmxhbmcuTnVtYmVyhqyVHQuU4IsCAAB4cAAAAAAAAAAAcHBzcgAtb3JnLmFwYWNoZS5zZWF0dW5uZWwuYXBpLnRhYmxlLnR5cGUuQmFzaWNUeXBlAAAAAAAAAAICAAJMAAdzcWxUeXBldAAtTG9yZy9hcGFjaGUvc2VhdHVubmVsL2FwaS90YWJsZS90eXBlL1NxbFR5cGU7TAAJdHlwZUNsYXNzdAARTGphdmEvbGFuZy9DbGFzczt4cH5yACtvcmcuYXBhY2hlLnNlYXR1bm5lbC5hcGkudGFibGUudHlwZS5TcWxUeXBlAAAAAAAAAAASAAB4cgAOamF2YS5sYW5nLkVudW0AAAAAAAAAABIAAHhwdAAGQklHSU5UdnEAfgAfcHBxAH4AFnBwcHBzcQB+ABkAAAFxAH4AIXBwcQB+ACVwcHEAfgAXcHBwcHhzcgARamF2YS51dGlsLkhhc2hNYXAFB9rBwxZg0QMAAkYACmxvYWRGYWN0b3JJAAl0aHJlc2hvbGR4cD9AAAAAAAAMdwgAAAAQAAAAA3QACWNvbm5lY3RvcnQABGpkYmN0AAp0YWJsZS1uYW1ldAAlbXlzcWxfY2RjLm15c3FsX2NkY19lMmVfc2lua190YWJsZTIyMnQAA3VybHQAJWpkYmM6bXlzcWw6Ly9sb2NhbGhvc3Q6MzMwNi9teXNxbF9jZGN4c3EAfgAJAAAAAHcEAAAAAHhzcgA2b3JnLmFwYWNoZS5zZWF0dW5uZWwuYXBpLnRhYmxlLmNhdGFsb2cuVGFibGVJZGVudGlmaWVyAAAAAAAAAAECAARMAAtjYXRhbG9nTmFtZXEAfgAGTAAMZGF0YWJhc2VOYW1lcQB+AAZMAApzY2hlbWFOYW1lcQB+AAZMAAl0YWJsZU5hbWVxAH4ABnhwcQB+ABB0AAlteXNxbF9jZGNwdAAbbXlzcWxfY2RjX2UyZV9zaW5rX3RhYmxlMjIyc3IAMm9yZy5hcGFjaGUuc2VhdHVubmVsLmFwaS50YWJsZS5jYXRhbG9nLlRhYmxlU2NoZW1hAAAAAAAAAAECAAJMAA5jb25zdHJhaW50S2V5c3EAfgACTAAKcHJpbWFyeUtleXQAM0xvcmcvYXBhY2hlL3NlYXR1bm5lbC9hcGkvdGFibGUvY2F0YWxvZy9QcmltYXJ5S2V5O3hxAH4AE3NxAH4ACQAAAA53BAAAAA50AAJpZHQADHNtYWxsaW50X2NvbHQAC2ludGVnZXJfY29sdAAKYmlnaW50X2NvbHQAC2RlY2ltYWxfY29sdAALbnVtZXJpY19jb2x0AAhyZWFsX2NvbHQACmRvdWJsZV9jb2x0AA9zbWFsbHNlcmlhbF9jb2x0AApzZXJpYWxfY29sdAANYmlnc2VyaWFsX2NvbHQAC3ZhcmNoYXJfY29sdAAIZGF0ZV9jb2x0AA10aW1lc3RhbXBfY29seHNxAH4ACQAAAA53BAAAAA5zcgA1b3JnLmFwYWNoZS5zZWF0dW5uZWwuYXBpLnRhYmxlLmNhdGFsb2cuUGh5c2ljYWxDb2x1bW4AAAAAAAAAAQIAAHhxAH4AGgAAAHEAfgAhcHQAAHNxAH4AIn5xAH4AJnQAA0lOVHZyABFqYXZhLmxhbmcuSW50ZWdlchLioKT3gYc4AgABSQAFdmFsdWV4cQB+ACBwcHEAfgA9cHBwdAADaW50c3EAfgBMAAABcQB+ACFwdAAM5a2X5q615rWL6K+Vc3EAfgAifnEAfgAmdAAIU01BTExJTlR2cgAPamF2YS5sYW5nLlNob3J0aE03EzRg2lICAAFTAAV2YWx1ZXhxAH4AIHBwcQB+AD5wcHB0AAhzbWFsbGludHNxAH4ATAAAAXEAfgAhcHQAAHEAfgBPcHBxAH4AP3BwcHQAA2ludHNxAH4ATAAAAXEAfgAhcHQAAHEAfgAlcHBxAH4AQHBwcHQABmJpZ2ludHNxAH4ATAAAAXNxAH4AHwAAAAAAAABQc3EAfgAfAAAAAAAAAAp0AABzcgAvb3JnLmFwYWNoZS5zZWF0dW5uZWwuYXBpLnRhYmxlLnR5cGUuRGVjaW1hbFR5cGUAAAAAAAAAAQIAAkkACXByZWNpc2lvbkkABXNjYWxleHEAfgAifnEAfgAmdAAHREVDSU1BTHZyABRqYXZhLm1hdGguQmlnRGVjaW1hbFTHFVf5gShPAwACSQAFc2NhbGVMAAZpbnRWYWx0ABZMamF2YS9tYXRoL0JpZ0ludGVnZXI7eHEAfgAgAAAACgAAAAJwcQB+AGVxAH4AQXBzcQB+AFIAAAACcHQADWRlY2ltYWwoMTAsMilzcQB+AEwAAAFxAH4AZHEAfgBldAAAc3EAfgBncQB+AGlxAH4AbQAAAAoAAAACcHEAfgBlcQB+AEJwcQB+AG5wdAANZGVjaW1hbCgxMCwyKXNxAH4ATAAAAXEAfgAhcHQAAHNxAH4AIn5xAH4AJnQABUZMT0FUdnIAD2phdmEubGFuZy5GbG9hdNrtyaLbPPDsAgABRgAFdmFsdWV4cQB+ACBwcHEAfgBDcHBwdAAFZmxvYXRzcQB+AEwAAAFxAH4AIXB0AABzcQB+ACJ+cQB+ACZ0AAZET1VCTEV2cgAQamF2YS5sYW5nLkRvdWJsZYCzwkopa/sEAgABRAAFdmFsdWV4cQB+ACBwcHEAfgBEcHBwdAAGZG91Ymxlc3EAfgBMAAABcQB+ACFwdAAAcQB+AFdwcHEAfgBFcHBwdAAIc21hbGxpbnRzcQB+AEwAAAFzcQB+AB8AAAAAAAAf4HNxAH4AHwAAAAAAAAP8dAAAc3EAfgAifnEAfgAmdAAGU1RSSU5HdnIAEGphdmEubGFuZy5TdHJpbmeg8KQ4ejuzQgIAAHhwcHEAfgCJcQB+AEZwcHB0AAx2YXJjaGFyKDI1NSlzcQB+AEwAAAFxAH4AIXB0AABxAH4AJXBwcQB+AEdwcHB0AAZiaWdpbnRzcQB+AEwAAAFzcQB+AB8AAAAAAAAGQHNxAH4AHwAAAAAAAADIdAAAcQB+AItwcQB+AJZxAH4ASHBwcHQAC3ZhcmNoYXIoNTApc3EAfgBMAAABcQB+ACFwdAAAc3IAMW9yZy5hcGFjaGUuc2VhdHVubmVsLmFwaS50YWJsZS50eXBlLkxvY2FsVGltZVR5cGUAAAAAAAAAAgIAAkwAB3NxbFR5cGVxAH4AI0wACXR5cGVDbGFzc3EAfgAkeHB+cQB+ACZ0AAREQVRFdnIAE2phdmEudGltZS5Mb2NhbERhdGUo1hex2PM/HgIAA1MAA2RheVMABW1vbnRoSQAEeWVhcnhwcHBxAH4ASXBwcHQABGRhdGVzcQB+AEwAAAFxAH4AIXB0AABzcQB+AJt+cQB+ACZ0AAlUSU1FU1RBTVB2cgAXamF2YS50aW1lLkxvY2FsRGF0ZVRpbWVWJmqmqV//LgIAAkwABGRhdGV0ABVMamF2YS90aW1lL0xvY2FsRGF0ZTtMAAR0aW1ldAAVTGphdmEvdGltZS9Mb2NhbFRpbWU7eHBwcHEAfgBKcHNxAH4AUgAAAABwdAAIZGF0ZXRpbWV4c3EAfgAJAAAAAHcEAAAAAHhzcgAxb3JnLmFwYWNoZS5zZWF0dW5uZWwuYXBpLnRhYmxlLmNhdGFsb2cuUHJpbWFyeUtleQAAAAAAAAABAgADTAALY29sdW1uTmFtZXNxAH4AAkwADGVuYWJsZUF1dG9JZHQAE0xqYXZhL2xhbmcvQm9vbGVhbjtMAApwcmltYXJ5S2V5cQB+AAZ4cHNxAH4ACQAAAAF3BAAAAAF0AAJpZHhwdAAHUFJJTUFSWXhzcQB+AAkAAAAAdwQAAAAAeHNxAH4ALD9AAAAAAAABdwgAAAACAAAAAXNyAB5pby5kZWJleml1bS5yZWxhdGlvbmFsLlRhYmxlSWQAAAAAAAAAAQIABEwAC2NhdGFsb2dOYW1lcQB+AAZMAAJpZHEAfgAGTAAKc2NoZW1hTmFtZXEAfgAGTAAJdGFibGVOYW1lcQB+AAZ4cHQACW15c3FsX2NkY3QAJW15c3FsX2NkYy5teXNxbF9jZGNfZTJlX3NpbmtfdGFibGUyMjJwdAAbbXlzcWxfY2RjX2UyZV9zaW5rX3RhYmxlMjIydXIAAltCrPMX+AYIVOACAAB4cAAAFAp7InNjaGVtYSI6eyJ0eXBlIjoic3RydWN0IiwiZmllbGRzIjpbeyJ0eXBlIjoic3RyaW5nIiwib3B0aW9uYWwiOmZhbHNlLCJmaWVsZCI6InR5cGUifSx7InR5cGUiOiJzdHJpbmciLCJvcHRpb25hbCI6ZmFsc2UsImZpZWxkIjoiaWQifSx7InR5cGUiOiJzdHJ1Y3QiLCJmaWVsZHMiOlt7InR5cGUiOiJzdHJpbmciLCJvcHRpb25hbCI6dHJ1ZSwiZmllbGQiOiJkZWZhdWx0Q2hhcnNldE5hbWUifSx7InR5cGUiOiJhcnJheSIsIml0ZW1zIjp7InR5cGUiOiJzdHJpbmciLCJvcHRpb25hbCI6ZmFsc2V9LCJvcHRpb25hbCI6dHJ1ZSwiZmllbGQiOiJwcmltYXJ5S2V5Q29sdW1uTmFtZXMifSx7InR5cGUiOiJhcnJheSIsIml0ZW1zIjp7InR5cGUiOiJzdHJ1Y3QiLCJmaWVsZHMiOlt7InR5cGUiOiJzdHJpbmciLCJvcHRpb25hbCI6ZmFsc2UsImZpZWxkIjoibmFtZSJ9LHsidHlwZSI6ImludDMyIiwib3B0aW9uYWwiOmZhbHNlLCJmaWVsZCI6ImpkYmNUeXBlIn0seyJ0eXBlIjoiaW50MzIiLCJvcHRpb25hbCI6dHJ1ZSwiZmllbGQiOiJuYXRpdmVUeXBlIn0seyJ0eXBlIjoic3RyaW5nIiwib3B0aW9uYWwiOmZhbHNlLCJmaWVsZCI6InR5cGVOYW1lIn0seyJ0eXBlIjoic3RyaW5nIiwib3B0aW9uYWwiOnRydWUsImZpZWxkIjoidHlwZUV4cHJlc3Npb24ifSx7InR5cGUiOiJzdHJpbmciLCJvcHRpb25hbCI6dHJ1ZSwiZmllbGQiOiJjaGFyc2V0TmFtZSJ9LHsidHlwZSI6ImludDMyIiwib3B0aW9uYWwiOnRydWUsImZpZWxkIjoibGVuZ3RoIn0seyJ0eXBlIjoiaW50MzIiLCJvcHRpb25hbCI6dHJ1ZSwiZmllbGQiOiJzY2FsZSJ9LHsidHlwZSI6ImludDMyIiwib3B0aW9uYWwiOmZhbHNlLCJmaWVsZCI6InBvc2l0aW9uIn0seyJ0eXBlIjoiYm9vbGVhbiIsIm9wdGlvbmFsIjp0cnVlLCJmaWVsZCI6Im9wdGlvbmFsIn0seyJ0eXBlIjoiYm9vbGVhbiIsIm9wdGlvbmFsIjp0cnVlLCJmaWVsZCI6ImF1dG9JbmNyZW1lbnRlZCJ9LHsidHlwZSI6ImJvb2xlYW4iLCJvcHRpb25hbCI6dHJ1ZSwiZmllbGQiOiJnZW5lcmF0ZWQifSx7InR5cGUiOiJzdHJpbmciLCJvcHRpb25hbCI6dHJ1ZSwiZmllbGQiOiJjb21tZW50In0seyJ0eXBlIjoiYXJyYXkiLCJpdGVtcyI6eyJ0eXBlIjoic3RyaW5nIiwib3B0aW9uYWwiOmZhbHNlfSwib3B0aW9uYWwiOnRydWUsImZpZWxkIjoiZW51bVZhbHVlcyJ9XSwib3B0aW9uYWwiOmZhbHNlLCJuYW1lIjoiaW8uZGViZXppdW0uY29ubmVjdG9yLnNjaGVtYS5Db2x1bW4ifSwib3B0aW9uYWwiOmZhbHNlLCJmaWVsZCI6ImNvbHVtbnMifSx7InR5cGUiOiJzdHJpbmciLCJvcHRpb25hbCI6dHJ1ZSwiZmllbGQiOiJjb21tZW50In1dLCJvcHRpb25hbCI6ZmFsc2UsIm5hbWUiOiJpby5kZWJleml1bS5jb25uZWN0b3Iuc2NoZW1hLlRhYmxlIiwiZmllbGQiOiJ0YWJsZSJ9XSwib3B0aW9uYWwiOmZhbHNlLCJuYW1lIjoiaW8uZGViZXppdW0uY29ubmVjdG9yLnNjaGVtYS5DaGFuZ2UifSwicGF5bG9hZCI6eyJ0eXBlIjoiQ1JFQVRFIiwiaWQiOiJcIm15c3FsX2NkY1wiLlwibXlzcWxfY2RjX2UyZV9zaW5rX3RhYmxlMjIyXCIiLCJ0YWJsZSI6eyJkZWZhdWx0Q2hhcnNldE5hbWUiOiJ1dGY4bWI0IiwicHJpbWFyeUtleUNvbHVtbk5hbWVzIjpbImlkIl0sImNvbHVtbnMiOlt7Im5hbWUiOiJpZCIsImpkYmNUeXBlIjo0LCJuYXRpdmVUeXBlIjpudWxsLCJ0eXBlTmFtZSI6IklOVCIsInR5cGVFeHByZXNzaW9uIjoiSU5UIiwiY2hhcnNldE5hbWUiOm51bGwsImxlbmd0aCI6bnVsbCwic2NhbGUiOm51bGwsInBvc2l0aW9uIjoxLCJvcHRpb25hbCI6ZmFsc2UsImF1dG9JbmNyZW1lbnRlZCI6ZmFsc2UsImdlbmVyYXRlZCI6ZmFsc2UsImNvbW1lbnQiOm51bGwsImVudW1WYWx1ZXMiOltdfSx7Im5hbWUiOiJzbWFsbGludF9jb2wiLCJqZGJjVHlwZSI6NSwibmF0aXZlVHlwZSI6bnVsbCwidHlwZU5hbWUiOiJTTUFMTElOVCIsInR5cGVFeHByZXNzaW9uIjoiU01BTExJTlQiLCJjaGFyc2V0TmFtZSI6bnVsbCwibGVuZ3RoIjpudWxsLCJzY2FsZSI6bnVsbCwicG9zaXRpb24iOjIsIm9wdGlvbmFsIjp0cnVlLCJhdXRvSW5jcmVtZW50ZWQiOmZhbHNlLCJnZW5lcmF0ZWQiOmZhbHNlLCJjb21tZW50IjpudWxsLCJlbnVtVmFsdWVzIjpbXX0seyJuYW1lIjoiaW50ZWdlcl9jb2wiLCJqZGJjVHlwZSI6NCwibmF0aXZlVHlwZSI6bnVsbCwidHlwZU5hbWUiOiJJTlQiLCJ0eXBlRXhwcmVzc2lvbiI6IklOVCIsImNoYXJzZXROYW1lIjpudWxsLCJsZW5ndGgiOm51bGwsInNjYWxlIjpudWxsLCJwb3NpdGlvbiI6Mywib3B0aW9uYWwiOnRydWUsImF1dG9JbmNyZW1lbnRlZCI6ZmFsc2UsImdlbmVyYXRlZCI6ZmFsc2UsImNvbW1lbnQiOm51bGwsImVudW1WYWx1ZXMiOltdfSx7Im5hbWUiOiJiaWdpbnRfY29sIiwiamRiY1R5cGUiOi01LCJuYXRpdmVUeXBlIjpudWxsLCJ0eXBlTmFtZSI6IkJJR0lOVCIsInR5cGVFeHByZXNzaW9uIjoiQklHSU5UIiwiY2hhcnNldE5hbWUiOm51bGwsImxlbmd0aCI6bnVsbCwic2NhbGUiOm51bGwsInBvc2l0aW9uIjo0LCJvcHRpb25hbCI6dHJ1ZSwiYXV0b0luY3JlbWVudGVkIjpmYWxzZSwiZ2VuZXJhdGVkIjpmYWxzZSwiY29tbWVudCI6bnVsbCwiZW51bVZhbHVlcyI6W119LHsibmFtZSI6ImRlY2ltYWxfY29sIiwiamRiY1R5cGUiOjMsIm5hdGl2ZVR5cGUiOm51bGwsInR5cGVOYW1lIjoiREVDSU1BTCIsInR5cGVFeHByZXNzaW9uIjoiREVDSU1BTCIsImNoYXJzZXROYW1lIjpudWxsLCJsZW5ndGgiOjEwLCJzY2FsZSI6MiwicG9zaXRpb24iOjUsIm9wdGlvbmFsIjp0cnVlLCJhdXRvSW5jcmVtZW50ZWQiOmZhbHNlLCJnZW5lcmF0ZWQiOmZhbHNlLCJjb21tZW50IjpudWxsLCJlbnVtVmFsdWVzIjpbXX0seyJuYW1lIjoibnVtZXJpY19jb2wiLCJqZGJjVHlwZSI6MywibmF0aXZlVHlwZSI6bnVsbCwidHlwZU5hbWUiOiJERUNJTUFMIiwidHlwZUV4cHJlc3Npb24iOiJERUNJTUFMIiwiY2hhcnNldE5hbWUiOm51bGwsImxlbmd0aCI6MTAsInNjYWxlIjoyLCJwb3NpdGlvbiI6Niwib3B0aW9uYWwiOnRydWUsImF1dG9JbmNyZW1lbnRlZCI6ZmFsc2UsImdlbmVyYXRlZCI6ZmFsc2UsImNvbW1lbnQiOm51bGwsImVudW1WYWx1ZXMiOltdfSx7Im5hbWUiOiJyZWFsX2NvbCIsImpkYmNUeXBlIjo2LCJuYXRpdmVUeXBlIjpudWxsLCJ0eXBlTmFtZSI6IkZMT0FUIiwidHlwZUV4cHJlc3Npb24iOiJGTE9BVCIsImNoYXJzZXROYW1lIjpudWxsLCJsZW5ndGgiOm51bGwsInNjYWxlIjpudWxsLCJwb3NpdGlvbiI6Nywib3B0aW9uYWwiOnRydWUsImF1dG9JbmNyZW1lbnRlZCI6ZmFsc2UsImdlbmVyYXRlZCI6ZmFsc2UsImNvbW1lbnQiOm51bGwsImVudW1WYWx1ZXMiOltdfSx7Im5hbWUiOiJkb3VibGVfY29sIiwiamRiY1R5cGUiOjgsIm5hdGl2ZVR5cGUiOm51bGwsInR5cGVOYW1lIjoiRE9VQkxFIiwidHlwZUV4cHJlc3Npb24iOiJET1VCTEUiLCJjaGFyc2V0TmFtZSI6bnVsbCwibGVuZ3RoIjpudWxsLCJzY2FsZSI6bnVsbCwicG9zaXRpb24iOjgsIm9wdGlvbmFsIjp0cnVlLCJhdXRvSW5jcmVtZW50ZWQiOmZhbHNlLCJnZW5lcmF0ZWQiOmZhbHNlLCJjb21tZW50IjpudWxsLCJlbnVtVmFsdWVzIjpbXX0seyJuYW1lIjoic21hbGxzZXJpYWxfY29sIiwiamRiY1R5cGUiOjUsIm5hdGl2ZVR5cGUiOm51bGwsInR5cGVOYW1lIjoiU01BTExJTlQiLCJ0eXBlRXhwcmVzc2lvbiI6IlNNQUxMSU5UIiwiY2hhcnNldE5hbWUiOm51bGwsImxlbmd0aCI6bnVsbCwic2NhbGUiOm51bGwsInBvc2l0aW9uIjo5LCJvcHRpb25hbCI6dHJ1ZSwiYXV0b0luY3JlbWVudGVkIjpmYWxzZSwiZ2VuZXJhdGVkIjpmYWxzZSwiY29tbWVudCI6bnVsbCwiZW51bVZhbHVlcyI6W119LHsibmFtZSI6InNlcmlhbF9jb2wiLCJqZGJjVHlwZSI6MTIsIm5hdGl2ZVR5cGUiOm51bGwsInR5cGVOYW1lIjoiVkFSQ0hBUiIsInR5cGVFeHByZXNzaW9uIjoiVkFSQ0hBUiIsImNoYXJzZXROYW1lIjoidXRmOG1iNCIsImxlbmd0aCI6MjU1LCJzY2FsZSI6bnVsbCwicG9zaXRpb24iOjEwLCJvcHRpb25hbCI6dHJ1ZSwiYXV0b0luY3JlbWVudGVkIjpmYWxzZSwiZ2VuZXJhdGVkIjpmYWxzZSwiY29tbWVudCI6bnVsbCwiZW51bVZhbHVlcyI6W119LHsibmFtZSI6ImJpZ3NlcmlhbF9jb2wiLCJqZGJjVHlwZSI6LTUsIm5hdGl2ZVR5cGUiOm51bGwsInR5cGVOYW1lIjoiQklHSU5UIiwidHlwZUV4cHJlc3Npb24iOiJCSUdJTlQiLCJjaGFyc2V0TmFtZSI6bnVsbCwibGVuZ3RoIjpudWxsLCJzY2FsZSI6bnVsbCwicG9zaXRpb24iOjExLCJvcHRpb25hbCI6dHJ1ZSwiYXV0b0luY3JlbWVudGVkIjpmYWxzZSwiZ2VuZXJhdGVkIjpmYWxzZSwiY29tbWVudCI6bnVsbCwiZW51bVZhbHVlcyI6W119LHsibmFtZSI6InZhcmNoYXJfY29sIiwiamRiY1R5cGUiOjEyLCJuYXRpdmVUeXBlIjpudWxsLCJ0eXBlTmFtZSI6IlZBUkNIQVIiLCJ0eXBlRXhwcmVzc2lvbiI6IlZBUkNIQVIiLCJjaGFyc2V0TmFtZSI6InV0ZjhtYjQiLCJsZW5ndGgiOjUwLCJzY2FsZSI6bnVsbCwicG9zaXRpb24iOjEyLCJvcHRpb25hbCI6dHJ1ZSwiYXV0b0luY3JlbWVudGVkIjpmYWxzZSwiZ2VuZXJhdGVkIjpmYWxzZSwiY29tbWVudCI6bnVsbCwiZW51bVZhbHVlcyI6W119LHsibmFtZSI6ImRhdGVfY29sIiwiamRiY1R5cGUiOjkxLCJuYXRpdmVUeXBlIjpudWxsLCJ0eXBlTmFtZSI6IkRBVEUiLCJ0eXBlRXhwcmVzc2lvbiI6IkRBVEUiLCJjaGFyc2V0TmFtZSI6bnVsbCwibGVuZ3RoIjpudWxsLCJzY2FsZSI6bnVsbCwicG9zaXRpb24iOjEzLCJvcHRpb25hbCI6dHJ1ZSwiYXV0b0luY3JlbWVudGVkIjpmYWxzZSwiZ2VuZXJhdGVkIjpmYWxzZSwiY29tbWVudCI6bnVsbCwiZW51bVZhbHVlcyI6W119LHsibmFtZSI6InRpbWVzdGFtcF9jb2wiLCJqZGJjVHlwZSI6OTMsIm5hdGl2ZVR5cGUiOm51bGwsInR5cGVOYW1lIjoiREFURVRJTUUiLCJ0eXBlRXhwcmVzc2lvbiI6IkRBVEVUSU1FIiwiY2hhcnNldE5hbWUiOm51bGwsImxlbmd0aCI6bnVsbCwic2NhbGUiOm51bGwsInBvc2l0aW9uIjoxNCwib3B0aW9uYWwiOnRydWUsImF1dG9JbmNyZW1lbnRlZCI6ZmFsc2UsImdlbmVyYXRlZCI6ZmFsc2UsImNvbW1lbnQiOm51bGwsImVudW1WYWx1ZXMiOltdfV0sImNvbW1lbnQiOm51bGx9fX14c3IATm9yZy5hcGFjaGUuc2VhdHVubmVsLmNvbm5lY3RvcnMuc2VhdHVubmVsLmNkYy5teXNxbC5zb3VyY2Uub2Zmc2V0LkJpbmxvZ09mZnNldAAAAAAAAAABAgAAeHIAPW9yZy5hcGFjaGUuc2VhdHVubmVsLmNvbm5lY3RvcnMuY2RjLmJhc2Uuc291cmNlLm9mZnNldC5PZmZzZXQAAAAAAAAAAQIAAUwABm9mZnNldHEAfgADeHBzcQB+ACw/QAAAAAAADHcIAAAAEAAAAAR0AA50cmFuc2FjdGlvbl9pZHB0AARmaWxldAANYmlubG9nLjAwMDAwN3QAA3Bvc3QABTE1MTA5dAAJc2VydmVyX2lkdAABMXhzcQB+AL1zcQB+ACw/QAAAAAAADHcIAAAAEAAAAAV0AAZ0c19zZWN0AAEwdAAEZmlsZXQAAHQAA3Bvc3QAFC05MjIzMzcyMDM2ODU0Nzc1ODA4dAADcm93dAABMHQABWV2ZW50dAABMHhzcQB+AAkAAAABdwQAAAABc3EAfgC2dAAJbXlzcWxfY2RjdAAlbXlzcWxfY2RjLm15c3FsX2NkY19lMmVfc2lua190YWJsZTIyMnB0ABtteXNxbF9jZGNfZTJlX3NpbmtfdGFibGUyMjJ4",
+          "error" : "Binary state preserved; class org.apache.seatunnel.connectors.cdc.base.source.split.IncrementalSplit lacks editable constructor"
+        } ]
+      } ]
+    } ],
+    "taskStatistics" : [ {
+      "jobVertexId" : 1000100000000,
+      "parallelism" : 1,
+      "subtaskStats" : [ {
+        "subtaskIndex" : 0,
+        "ackTimestamp" : 1760841955128,
+        "stateSize" : 1,
+        "status" : "RUNNING"
+      } ],
+      "subtaskCompleted" : [ false ]
+    }, {
+      "jobVertexId" : 1000200000000,
+      "parallelism" : 1,
+      "subtaskStats" : [ {
+        "subtaskIndex" : 0,
+        "ackTimestamp" : 1760841955128,
+        "stateSize" : 1,
+        "status" : "RUNNING"
+      } ],
+      "subtaskCompleted" : [ false ]
+    }, {
+      "jobVertexId" : 1000200010000,
+      "parallelism" : 1,
+      "subtaskStats" : [ {
+        "subtaskIndex" : 0,
+        "ackTimestamp" : 1760841955128,
+        "stateSize" : 0,
+        "status" : "RUNNING"
+      } ],
+      "subtaskCompleted" : [ false ]
+    } ]
+  }
+}
