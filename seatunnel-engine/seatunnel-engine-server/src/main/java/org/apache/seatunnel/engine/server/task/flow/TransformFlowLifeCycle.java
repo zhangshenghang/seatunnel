@@ -29,6 +29,15 @@ import org.apache.seatunnel.engine.server.checkpoint.ActionStateKey;
 import org.apache.seatunnel.engine.server.checkpoint.ActionSubtaskState;
 import org.apache.seatunnel.engine.server.checkpoint.CheckpointBarrier;
 import org.apache.seatunnel.engine.server.task.SeaTunnelTask;
+import org.apache.seatunnel.engine.server.task.error.DefaultRowErrorClassifier;
+import org.apache.seatunnel.engine.server.task.error.ErrorHandler;
+import org.apache.seatunnel.engine.server.task.error.ErrorHandlerConfigUtil;
+import org.apache.seatunnel.engine.server.task.error.ErrorHandlerConfigUtil.StageType;
+import org.apache.seatunnel.engine.server.task.error.ErrorHandlerMode;
+import org.apache.seatunnel.engine.server.task.error.ErrorHandlingFlatMapTransform;
+import org.apache.seatunnel.engine.server.task.error.ErrorHandlingMapTransform;
+import org.apache.seatunnel.engine.server.task.error.RowErrorClassifier;
+import org.apache.seatunnel.engine.server.task.error.StageErrorConfig;
 import org.apache.seatunnel.engine.server.task.record.Barrier;
 
 import org.apache.commons.collections4.CollectionUtils;
@@ -64,6 +73,7 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
     @Override
     public void open() throws Exception {
         super.open();
+        initErrorHandlingTransforms();
         for (SeaTunnelTransform<T> t : transform) {
             try {
                 t.open();
@@ -196,5 +206,35 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
             }
         }
         super.close();
+    }
+
+    private void initErrorHandlingTransforms() {
+        if (!(runningTask instanceof SeaTunnelTask)) {
+            return;
+        }
+        SeaTunnelTask seaTunnelTask = (SeaTunnelTask) runningTask;
+        StageErrorConfig stageConfig =
+                ErrorHandlerConfigUtil.buildStageConfig(
+                        seaTunnelTask.getEnvOptions(), StageType.TRANSFORM);
+        if (stageConfig.getMode() == ErrorHandlerMode.DISABLE) {
+            return;
+        }
+        ErrorHandler<T> handler = new ErrorHandler<>(stageConfig);
+        RowErrorClassifier<T> classifier = new DefaultRowErrorClassifier<>();
+
+        for (int i = 0; i < transform.size(); i++) {
+            SeaTunnelTransform<T> t = transform.get(i);
+            if (t instanceof SeaTunnelFlatMapTransform) {
+                transform.set(
+                        i,
+                        new ErrorHandlingFlatMapTransform<>(
+                                (SeaTunnelFlatMapTransform<T>) t, handler, classifier));
+            } else if (t instanceof SeaTunnelMapTransform) {
+                transform.set(
+                        i,
+                        new ErrorHandlingMapTransform<>(
+                                (SeaTunnelMapTransform<T>) t, handler, classifier));
+            }
+        }
     }
 }

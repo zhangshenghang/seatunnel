@@ -1,0 +1,434 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.seatunnel.engine.server.task.error;
+
+import org.apache.seatunnel.api.common.PluginIdentifier;
+import org.apache.seatunnel.api.common.metrics.Counter;
+import org.apache.seatunnel.api.common.metrics.Meter;
+import org.apache.seatunnel.api.common.metrics.MetricsContext;
+import org.apache.seatunnel.api.common.metrics.Unit;
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
+import org.apache.seatunnel.api.event.EventListener;
+import org.apache.seatunnel.api.sink.SeaTunnelSink;
+import org.apache.seatunnel.api.sink.SinkWriter;
+import org.apache.seatunnel.api.table.catalog.CatalogTable;
+import org.apache.seatunnel.api.table.catalog.PhysicalColumn;
+import org.apache.seatunnel.api.table.catalog.TableIdentifier;
+import org.apache.seatunnel.api.table.catalog.TableSchema;
+import org.apache.seatunnel.api.table.factory.FactoryUtil;
+import org.apache.seatunnel.api.table.factory.TableSinkFactory;
+import org.apache.seatunnel.api.table.type.BasicType;
+import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
+import org.apache.seatunnel.api.table.type.SeaTunnelRow;
+import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
+import org.apache.seatunnel.common.constants.EngineType;
+import org.apache.seatunnel.common.constants.PluginType;
+import org.apache.seatunnel.common.exception.SeaTunnelRuntimeException;
+import org.apache.seatunnel.plugin.discovery.seatunnel.SeaTunnelSinkPluginDiscovery;
+
+import lombok.extern.slf4j.Slf4j;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * Default {@link ErrorSinkRowWriter} implementation that uses the SeaTunnel sink plugin system to
+ * route error rows into a configured error sink.
+ *
+ * <p>It creates a dedicated {@link SeaTunnelSink} and {@link SinkWriter} for the error table and
+ * writes error records asynchronously through a bounded queue, so the main data path is minimally
+ * affected.
+ */
+@Slf4j
+public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
+
+    private final StageErrorConfig stageConfig;
+    private final ErrorSinkConfig sinkConfig;
+
+    private transient volatile boolean initialized;
+    private transient volatile boolean closed;
+    private transient volatile Throwable workerFailure;
+
+    private transient SeaTunnelRowType errorRowType;
+    private transient SeaTunnelSink<SeaTunnelRow, ?, ?, ?> errorSink;
+    private transient SinkWriter<SeaTunnelRow, ?, ?> writer;
+    private transient BlockingQueue<SeaTunnelRow> queue;
+    private transient Thread workerThread;
+
+    public DefaultErrorSinkWriter(StageErrorConfig stageConfig, ErrorSinkConfig sinkConfig) {
+        this.stageConfig = stageConfig;
+        this.sinkConfig = sinkConfig;
+    }
+
+    @Override
+    public void write(RowErrorContext ctx, T row, Throwable t) throws Exception {
+        if (stageConfig.getMode() != ErrorHandlerMode.ROUTE) {
+            return;
+        }
+        ensureInitialized();
+
+        if (workerFailure != null) {
+            throw new RuntimeException(
+                    String.format(
+                            "Error sink previously failed for stage [%s], plugin [%s]",
+                            ctx.getStage(), ctx.getPluginName()),
+                    workerFailure);
+        }
+
+        SeaTunnelRow errorRow = buildErrorRow(ctx, row, t);
+
+        try {
+            switch (stageConfig.getQueueOverflowPolicy()) {
+                case DROP:
+                    queue.offer(errorRow);
+                    break;
+                case BLOCK:
+                    queue.put(errorRow);
+                    break;
+                case FAIL:
+                default:
+                    if (!queue.offer(errorRow)) {
+                        throw new RuntimeException(
+                                String.format(
+                                        "Error queue overflow for stage [%s], plugin [%s]",
+                                        ctx.getStage(), ctx.getPluginName()));
+                    }
+                    break;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while enqueuing error row for error sink", e);
+        }
+    }
+
+    private synchronized void ensureInitialized() {
+        if (initialized) {
+            return;
+        }
+        try {
+            this.errorRowType = buildErrorRowType();
+            CatalogTable catalogTable = buildCatalogTable(errorRowType);
+            ReadonlyConfig readonlyConfig = ReadonlyConfig.fromMap(sinkConfig.getOptions());
+
+            ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
+            TableSinkFactory<SeaTunnelRow, ?, ?, ?> tableSinkFactory =
+                    FactoryUtil.discoverFactory(
+                            contextClassLoader, TableSinkFactory.class, sinkConfig.getPluginName());
+
+            SeaTunnelSinkPluginDiscovery discovery = new SeaTunnelSinkPluginDiscovery();
+            SeaTunnelSink<SeaTunnelRow, ?, ?, ?> sink =
+                    FactoryUtil.createAndPrepareSink(
+                            catalogTable,
+                            readonlyConfig,
+                            contextClassLoader,
+                            sinkConfig.getPluginName(),
+                            pluginIdentifier ->
+                                    discovery.createPluginInstance(
+                                            PluginIdentifier.of(
+                                                    EngineType.SEATUNNEL.getEngine(),
+                                                    PluginType.SINK.getType(),
+                                                    pluginIdentifier.getPluginName())),
+                            tableSinkFactory);
+
+            this.errorSink = sink;
+            SinkWriter.Context writerContext =
+                    new SimpleWriterContext(new NoopMetricsContext(), event -> {});
+            @SuppressWarnings("unchecked")
+            SinkWriter<SeaTunnelRow, ?, ?> sinkWriter =
+                    (SinkWriter<SeaTunnelRow, ?, ?>) sink.createWriter(writerContext);
+            this.writer = sinkWriter;
+
+            int capacity =
+                    stageConfig.getQueueCapacity() > 0 ? stageConfig.getQueueCapacity() : 10000;
+            this.queue = new ArrayBlockingQueue<>(capacity);
+            this.closed = false;
+            this.workerThread =
+                    new Thread(
+                            this::drainLoop, "seatunnel-error-sink-" + sinkConfig.getPluginName());
+            this.workerThread.setDaemon(true);
+            this.workerThread.start();
+
+            initialized = true;
+        } catch (Throwable e) {
+            throw new SeaTunnelRuntimeException(
+                    org.apache.seatunnel.common.exception.CommonErrorCodeDeprecated
+                            .WRITER_OPERATION_FAILED,
+                    "Failed to initialize error sink writer",
+                    e);
+        }
+    }
+
+    private void drainLoop() {
+        try {
+            while (!closed || !queue.isEmpty()) {
+                SeaTunnelRow row = queue.poll(100, TimeUnit.MILLISECONDS);
+                if (row == null) {
+                    continue;
+                }
+                writer.write(row);
+            }
+            writer.close();
+        } catch (Throwable e) {
+            workerFailure = e;
+            log.error("Error sink writer failed", e);
+        }
+    }
+
+    private SeaTunnelRowType buildErrorRowType() {
+        List<String> fieldNames = new ArrayList<>();
+        List<SeaTunnelDataType<?>> fieldTypes = new ArrayList<>();
+
+        fieldNames.add("error_stage");
+        fieldTypes.add(BasicType.STRING_TYPE);
+        fieldNames.add("plugin_type");
+        fieldTypes.add(BasicType.STRING_TYPE);
+        fieldNames.add("plugin_name");
+        fieldTypes.add(BasicType.STRING_TYPE);
+        fieldNames.add("source_table_path");
+        fieldTypes.add(BasicType.STRING_TYPE);
+        fieldNames.add("error_message");
+        fieldTypes.add(BasicType.STRING_TYPE);
+        fieldNames.add("exception_class");
+        fieldTypes.add(BasicType.STRING_TYPE);
+        fieldNames.add("stacktrace");
+        fieldTypes.add(BasicType.STRING_TYPE);
+        fieldNames.add("original_data");
+        fieldTypes.add(BasicType.STRING_TYPE);
+        fieldNames.add("occur_time");
+        fieldTypes.add(BasicType.LONG_TYPE);
+
+        return new SeaTunnelRowType(
+                fieldNames.toArray(new String[0]), fieldTypes.toArray(new SeaTunnelDataType[0]));
+    }
+
+    private CatalogTable buildCatalogTable(SeaTunnelRowType rowType) {
+        List<PhysicalColumn> columns = new ArrayList<>();
+        for (int i = 0; i < rowType.getTotalFields(); i++) {
+            columns.add(
+                    PhysicalColumn.of(
+                            rowType.getFieldName(i),
+                            rowType.getFieldType(i),
+                            (Long) null,
+                            true,
+                            null,
+                            null));
+        }
+        TableSchema tableSchema =
+                TableSchema.builder()
+                        .columns(new ArrayList<>(columns))
+                        .primaryKey(null)
+                        .constraintKey(new ArrayList<>())
+                        .build();
+
+        String tableName =
+                sinkConfig.getErrorTable() == null ? "st_error_data" : sinkConfig.getErrorTable();
+        TableIdentifier tableId = TableIdentifier.of("error_sink", null, tableName);
+
+        Map<String, String> options = new HashMap<>();
+        sinkConfig
+                .getOptions()
+                .forEach((k, v) -> options.put(k, v == null ? null : String.valueOf(v)));
+
+        return CatalogTable.of(tableId, tableSchema, options, new ArrayList<>(), null);
+    }
+
+    private SeaTunnelRow buildErrorRow(RowErrorContext ctx, T row, Throwable t) {
+        Object[] fields = new Object[errorRowType.getTotalFields()];
+        int idx = 0;
+        fields[idx++] = ctx.getStage();
+        fields[idx++] = ctx.getPluginType();
+        fields[idx++] = ctx.getPluginName();
+        fields[idx++] = ctx.getTableId();
+        fields[idx++] = t == null ? null : truncate(t.getMessage(), 1024);
+        fields[idx++] = t == null ? null : t.getClass().getName();
+        fields[idx++] =
+                stageConfig.isIncludeStacktrace() && t != null
+                        ? truncate(
+                                org.apache.seatunnel.common.utils.ExceptionUtils.getMessage(t),
+                                4096)
+                        : null;
+        fields[idx++] =
+                stageConfig.isIncludeOriginalData()
+                        ? truncate(String.valueOf(row), stageConfig.getOriginalDataMaxLength())
+                        : null;
+        fields[idx] = Instant.now().toEpochMilli();
+
+        return new SeaTunnelRow(fields);
+    }
+
+    private String truncate(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
+    }
+
+    private static final class SimpleWriterContext implements SinkWriter.Context {
+        private static final long serialVersionUID = 1L;
+
+        private final MetricsContext metricsContext;
+        private final EventListener eventListener;
+
+        private SimpleWriterContext(MetricsContext metricsContext, EventListener eventListener) {
+            this.metricsContext = metricsContext;
+            this.eventListener = eventListener;
+        }
+
+        @Override
+        public int getIndexOfSubtask() {
+            return 0;
+        }
+
+        @Override
+        public MetricsContext getMetricsContext() {
+            return metricsContext;
+        }
+
+        @Override
+        public EventListener getEventListener() {
+            return eventListener;
+        }
+    }
+
+    private static final class NoopMetricsContext implements MetricsContext {
+
+        @Override
+        public Counter counter(String name) {
+            return new NoopCounter(name);
+        }
+
+        @Override
+        public <C extends Counter> C counter(String name, C counter) {
+            return counter;
+        }
+
+        @Override
+        public Meter meter(String name) {
+            return new NoopMeter(name);
+        }
+
+        @Override
+        public <M extends Meter> M meter(String name, M meter) {
+            return meter;
+        }
+    }
+
+    private static final class NoopCounter implements Counter {
+
+        private final String name;
+        private long count;
+
+        private NoopCounter() {
+            this("noop_counter");
+        }
+
+        private NoopCounter(String name) {
+            this.name = name;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public Unit unit() {
+            return Unit.COUNT;
+        }
+
+        @Override
+        public void inc() {
+            count++;
+        }
+
+        @Override
+        public void inc(long n) {
+            count += n;
+        }
+
+        @Override
+        public void dec() {
+            count--;
+        }
+
+        @Override
+        public void dec(long n) {
+            count -= n;
+        }
+
+        @Override
+        public void set(long n) {
+            count = n;
+        }
+
+        @Override
+        public long getCount() {
+            return count;
+        }
+    }
+
+    private static final class NoopMeter implements Meter {
+
+        private final String name;
+        private long count;
+
+        private NoopMeter() {
+            this("noop_meter");
+        }
+
+        private NoopMeter(String name) {
+            this.name = name;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public Unit unit() {
+            return Unit.COUNT;
+        }
+
+        @Override
+        public void markEvent() {
+            count++;
+        }
+
+        @Override
+        public void markEvent(long n) {
+            count += n;
+        }
+
+        @Override
+        public double getRate() {
+            return 0.0d;
+        }
+
+        @Override
+        public long getCount() {
+            return count;
+        }
+    }
+}

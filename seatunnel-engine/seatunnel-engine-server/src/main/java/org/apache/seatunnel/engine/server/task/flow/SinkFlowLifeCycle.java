@@ -42,6 +42,17 @@ import org.apache.seatunnel.engine.server.execution.TaskLocation;
 import org.apache.seatunnel.engine.server.metrics.ConnectorMetricsCalcContext;
 import org.apache.seatunnel.engine.server.task.SeaTunnelTask;
 import org.apache.seatunnel.engine.server.task.context.SinkWriterContext;
+import org.apache.seatunnel.engine.server.task.error.DefaultErrorSinkWriter;
+import org.apache.seatunnel.engine.server.task.error.DefaultRowErrorClassifier;
+import org.apache.seatunnel.engine.server.task.error.ErrorHandler;
+import org.apache.seatunnel.engine.server.task.error.ErrorHandlerConfigUtil;
+import org.apache.seatunnel.engine.server.task.error.ErrorHandlerConfigUtil.StageType;
+import org.apache.seatunnel.engine.server.task.error.ErrorHandlerMode;
+import org.apache.seatunnel.engine.server.task.error.ErrorHandlingSinkWriter;
+import org.apache.seatunnel.engine.server.task.error.ErrorSinkConfig;
+import org.apache.seatunnel.engine.server.task.error.ErrorSinkRowWriter;
+import org.apache.seatunnel.engine.server.task.error.RowErrorClassifier;
+import org.apache.seatunnel.engine.server.task.error.StageErrorConfig;
 import org.apache.seatunnel.engine.server.task.operation.GetTaskGroupAddressOperation;
 import org.apache.seatunnel.engine.server.task.operation.checkpoint.BarrierFlowOperation;
 import org.apache.seatunnel.engine.server.task.operation.sink.SinkPrepareCommitOperation;
@@ -267,19 +278,18 @@ public class SinkFlowLifeCycle<T, CommitInfoT extends Serializable, AggregatedCo
                     return;
                 }
                 String tableId;
-                writer.write((T) record.getData());
-                if (record.getData() instanceof SeaTunnelRow) {
+                Object data = record.getData();
+                writer.write((T) data);
+                if (data instanceof SeaTunnelRow) {
                     if (this.sinkAction.getSink() instanceof MultiTableSink) {
-                        if (((SeaTunnelRow) record.getData()).getTableId() == null
-                                || ((SeaTunnelRow) record.getData()).getTableId().isEmpty()) {
-                            tableId = ((SeaTunnelRow) record.getData()).getTableId();
+                        if (((SeaTunnelRow) data).getTableId() == null
+                                || ((SeaTunnelRow) data).getTableId().isEmpty()) {
+                            tableId = ((SeaTunnelRow) data).getTableId();
                         } else {
 
                             TablePath tablePath =
                                     tablesMaps.get(
-                                            TablePath.of(
-                                                    ((SeaTunnelRow) record.getData())
-                                                            .getTableId()));
+                                            TablePath.of(((SeaTunnelRow) data).getTableId()));
                             tableId =
                                     tablePath != null
                                             ? tablePath.getFullName()
@@ -297,7 +307,7 @@ public class SinkFlowLifeCycle<T, CommitInfoT extends Serializable, AggregatedCo
                                         .orElseGet(TablePath.DEFAULT::getFullName);
                     }
 
-                    connectorMetricsCalcContext.updateMetrics(record.getData(), tableId);
+                    connectorMetricsCalcContext.updateMetrics(data, tableId);
                 }
             }
         } catch (Exception e) {
@@ -347,5 +357,37 @@ public class SinkFlowLifeCycle<T, CommitInfoT extends Serializable, AggregatedCo
         } else {
             this.writer = sinkAction.getSink().restoreWriter(writerContext, states);
         }
+        wrapWriterIfNeed();
+    }
+
+    private void wrapWriterIfNeed() {
+        if (!(runningTask instanceof SeaTunnelTask)) {
+            return;
+        }
+        SeaTunnelTask seaTunnelTask = (SeaTunnelTask) runningTask;
+        StageErrorConfig stageConfig =
+                ErrorHandlerConfigUtil.buildStageConfig(
+                        seaTunnelTask.getEnvOptions(), StageType.SINK);
+        if (stageConfig.getMode() == ErrorHandlerMode.DISABLE) {
+            return;
+        }
+
+        ErrorSinkRowWriter<T> errorSinkWriter = createErrorSinkWriter(stageConfig);
+        ErrorHandler<T> handler = new ErrorHandler<>(stageConfig, errorSinkWriter);
+        RowErrorClassifier<T> classifier = new DefaultRowErrorClassifier<>();
+        String pluginName = sinkAction.getSink().getPluginName();
+        this.writer = new ErrorHandlingSinkWriter<>(this.writer, handler, classifier, pluginName);
+    }
+
+    @SuppressWarnings("unchecked")
+    private ErrorSinkRowWriter<T> createErrorSinkWriter(StageErrorConfig stageConfig) {
+        if (stageConfig.getMode() != ErrorHandlerMode.ROUTE) {
+            return null;
+        }
+        ErrorSinkConfig sinkConfig = stageConfig.getSink();
+        if (sinkConfig == null || !sinkConfig.isConfigured()) {
+            return null;
+        }
+        return (ErrorSinkRowWriter<T>) new DefaultErrorSinkWriter<>(stageConfig, sinkConfig);
     }
 }
