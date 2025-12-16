@@ -33,6 +33,7 @@ import org.apache.seatunnel.api.table.catalog.TableSchema;
 import org.apache.seatunnel.api.table.factory.FactoryUtil;
 import org.apache.seatunnel.api.table.factory.TableSinkFactory;
 import org.apache.seatunnel.api.table.type.BasicType;
+import org.apache.seatunnel.api.table.type.LocalTimeType;
 import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
@@ -285,7 +286,7 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
         fieldNames.add("original_data");
         fieldTypes.add(BasicType.STRING_TYPE);
         fieldNames.add("occur_time");
-        fieldTypes.add(BasicType.LONG_TYPE);
+        fieldTypes.add(LocalTimeType.LOCAL_DATE_TIME_TYPE);
 
         return new SeaTunnelRowType(
                 fieldNames.toArray(new String[0]), fieldTypes.toArray(new SeaTunnelDataType[0]));
@@ -346,7 +347,7 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                 stageConfig.isIncludeOriginalData()
                         ? truncate(String.valueOf(row), stageConfig.getOriginalDataMaxLength())
                         : null;
-        fields[idx] = Instant.now().toEpochMilli();
+        fields[idx] = java.time.LocalDateTime.ofInstant(Instant.now(), java.time.ZoneOffset.UTC);
 
         return new SeaTunnelRow(fields);
     }
