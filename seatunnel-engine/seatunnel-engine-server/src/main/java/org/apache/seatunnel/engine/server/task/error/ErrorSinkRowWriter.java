@@ -20,7 +20,7 @@ package org.apache.seatunnel.engine.server.task.error;
 import java.io.Serializable;
 
 /** Sink writer used by {@link ErrorHandler} to persist error records. */
-public interface ErrorSinkRowWriter<T> extends Serializable {
+public interface ErrorSinkRowWriter<T> extends Serializable, AutoCloseable {
 
     /**
      * Write a single error record to the error sink.
@@ -34,4 +34,7 @@ public interface ErrorSinkRowWriter<T> extends Serializable {
      *     fail the job
      */
     void write(RowErrorContext ctx, T row, Throwable t) throws Exception;
+
+    @Override
+    void close() throws Exception;
 }

@@ -122,6 +122,19 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
         }
     }
 
+    @Override
+    public void close() throws Exception {
+        closed = true;
+        if (workerThread != null) {
+            try {
+                workerThread.join(5000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Interrupted while waiting for error sink worker to close");
+            }
+        }
+    }
+
     private synchronized void ensureInitialized() {
         if (initialized) {
             return;
@@ -249,6 +262,11 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
         sinkConfig
                 .getOptions()
                 .forEach((k, v) -> options.put(k, v == null ? null : String.valueOf(v)));
+
+        // Ensure error rows are flushed even when the total volume is small.
+        // For connectors like Jdbc this means every error row is written immediately
+        // instead of being buffered indefinitely waiting for a checkpoint/close.
+        options.putIfAbsent("batch_size", "1");
 
         return CatalogTable.of(tableId, tableSchema, options, new ArrayList<>(), null);
     }

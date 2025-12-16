@@ -51,6 +51,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
@@ -213,13 +214,19 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
 
     private void initErrorHandlingTransforms() {
         if (!(runningTask instanceof SeaTunnelTask)) {
+            log.error("DEBUG: runningTask is not SeaTunnelTask");
             return;
         }
         SeaTunnelTask seaTunnelTask = (SeaTunnelTask) runningTask;
+        Map<String, Object> envOptions = seaTunnelTask.getEnvOptions();
+        log.error("DEBUG: envOptions: {}", envOptions);
+
         StageErrorConfig stageConfig =
-                ErrorHandlerConfigUtil.buildStageConfig(
-                        seaTunnelTask.getEnvOptions(), StageType.TRANSFORM);
+                ErrorHandlerConfigUtil.buildStageConfig(envOptions, StageType.TRANSFORM);
+        log.error("DEBUG: stageConfig: {}", stageConfig);
+
         if (stageConfig.getMode() == ErrorHandlerMode.DISABLE) {
+            log.error("DEBUG: stageConfig mode is DISABLE");
             return;
         }
         ErrorSinkRowWriter<T> errorSinkWriter = createErrorSinkWriter(stageConfig);
@@ -229,11 +236,14 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
         for (int i = 0; i < transform.size(); i++) {
             SeaTunnelTransform<T> t = transform.get(i);
             if (t instanceof SeaTunnelFlatMapTransform) {
+                log.error(
+                        "DEBUG: Wrapping SeaTunnelFlatMapTransform with ErrorHandlingFlatMapTransform");
                 transform.set(
                         i,
                         new ErrorHandlingFlatMapTransform<>(
                                 (SeaTunnelFlatMapTransform<T>) t, handler, classifier));
             } else if (t instanceof SeaTunnelMapTransform) {
+                log.error("DEBUG: Wrapping SeaTunnelMapTransform with ErrorHandlingMapTransform");
                 transform.set(
                         i,
                         new ErrorHandlingMapTransform<>(

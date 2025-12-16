@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * writing error records to a dedicated error sink when configured.
  */
 @Slf4j
-public class ErrorHandler<T> implements Serializable {
+public class ErrorHandler<T> implements Serializable, AutoCloseable {
 
     private final StageErrorConfig config;
     private final ErrorSinkRowWriter<T> errorSinkWriter;
@@ -79,6 +79,7 @@ public class ErrorHandler<T> implements Serializable {
 
             if (config.getMode() == ErrorHandlerMode.ROUTE && errorSinkWriter != null) {
                 try {
+                    log.info("Writing error row to sink: {}", row);
                     errorSinkWriter.write(ctx, row, t);
                 } catch (Exception sinkEx) {
                     throw new RuntimeException(
@@ -126,5 +127,16 @@ public class ErrorHandler<T> implements Serializable {
             return value;
         }
         return value.substring(0, maxLength);
+    }
+
+    @Override
+    public void close() {
+        if (errorSinkWriter != null) {
+            try {
+                errorSinkWriter.close();
+            } catch (Exception e) {
+                log.error("Failed to close error sink writer", e);
+            }
+        }
     }
 }

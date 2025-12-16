@@ -53,6 +53,7 @@ public class ErrorHandlingFlatMapTransform<T> implements SeaTunnelFlatMapTransfo
         try {
             return delegate.flatMap(row);
         } catch (Throwable t) {
+            log.info("ErrorHandlingFlatMapTransform caught exception: {}", t.getMessage(), t);
             if (errorHandler == null || !isRowError(row, t)) {
                 if (t instanceof RuntimeException) {
                     throw (RuntimeException) t;
@@ -124,6 +125,9 @@ public class ErrorHandlingFlatMapTransform<T> implements SeaTunnelFlatMapTransfo
     @Override
     public void close() {
         delegate.close();
+        if (errorHandler != null) {
+            errorHandler.close();
+        }
     }
 
     @Override
