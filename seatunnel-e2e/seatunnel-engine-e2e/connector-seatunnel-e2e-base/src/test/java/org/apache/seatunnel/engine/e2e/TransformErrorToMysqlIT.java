@@ -28,6 +28,7 @@ import org.apache.seatunnel.e2e.common.junit.TestContainerExtension;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.MySQLContainer;
@@ -122,6 +123,104 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
                                 + "stacktrace TEXT, "
                                 + "original_data TEXT, "
                                 + "occur_time TIMESTAMP)");
+                statement.execute(
+                        "CREATE TABLE orders_transform_error_no_error ("
+                                + "error_stage VARCHAR(50), "
+                                + "plugin_type VARCHAR(50), "
+                                + "plugin_name VARCHAR(100), "
+                                + "source_table_path VARCHAR(255), "
+                                + "row_kind VARCHAR(20), "
+                                + "error_type VARCHAR(50), "
+                                + "error_code VARCHAR(50), "
+                                + "error_message TEXT, "
+                                + "exception_class VARCHAR(255), "
+                                + "stacktrace TEXT, "
+                                + "original_data TEXT, "
+                                + "occur_time TIMESTAMP)");
+                statement.execute(
+                        "CREATE TABLE orders_transform_error_global ("
+                                + "error_stage VARCHAR(50), "
+                                + "plugin_type VARCHAR(50), "
+                                + "plugin_name VARCHAR(100), "
+                                + "source_table_path VARCHAR(255), "
+                                + "row_kind VARCHAR(20), "
+                                + "error_type VARCHAR(50), "
+                                + "error_code VARCHAR(50), "
+                                + "error_message TEXT, "
+                                + "exception_class VARCHAR(255), "
+                                + "stacktrace TEXT, "
+                                + "original_data TEXT, "
+                                + "occur_time TIMESTAMP)");
+                statement.execute(
+                        "CREATE TABLE orders_transform_error_no_orig_stack ("
+                                + "error_stage VARCHAR(50), "
+                                + "plugin_type VARCHAR(50), "
+                                + "plugin_name VARCHAR(100), "
+                                + "source_table_path VARCHAR(255), "
+                                + "row_kind VARCHAR(20), "
+                                + "error_type VARCHAR(50), "
+                                + "error_code VARCHAR(50), "
+                                + "error_message TEXT, "
+                                + "exception_class VARCHAR(255), "
+                                + "stacktrace TEXT, "
+                                + "original_data TEXT, "
+                                + "occur_time TIMESTAMP)");
+                statement.execute(
+                        "CREATE TABLE orders_transform_error_orig_only ("
+                                + "error_stage VARCHAR(50), "
+                                + "plugin_type VARCHAR(50), "
+                                + "plugin_name VARCHAR(100), "
+                                + "source_table_path VARCHAR(255), "
+                                + "row_kind VARCHAR(20), "
+                                + "error_type VARCHAR(50), "
+                                + "error_code VARCHAR(50), "
+                                + "error_message TEXT, "
+                                + "exception_class VARCHAR(255), "
+                                + "stacktrace TEXT, "
+                                + "original_data TEXT, "
+                                + "occur_time TIMESTAMP)");
+                statement.execute(
+                        "CREATE TABLE orders_transform_error_drop ("
+                                + "error_stage VARCHAR(50), "
+                                + "plugin_type VARCHAR(50), "
+                                + "plugin_name VARCHAR(100), "
+                                + "source_table_path VARCHAR(255), "
+                                + "row_kind VARCHAR(20), "
+                                + "error_type VARCHAR(50), "
+                                + "error_code VARCHAR(50), "
+                                + "error_message TEXT, "
+                                + "exception_class VARCHAR(255), "
+                                + "stacktrace TEXT, "
+                                + "original_data TEXT, "
+                                + "occur_time TIMESTAMP)");
+                statement.execute(
+                        "CREATE TABLE orders_transform_error_fail ("
+                                + "error_stage VARCHAR(50), "
+                                + "plugin_type VARCHAR(50), "
+                                + "plugin_name VARCHAR(100), "
+                                + "source_table_path VARCHAR(255), "
+                                + "row_kind VARCHAR(20), "
+                                + "error_type VARCHAR(50), "
+                                + "error_code VARCHAR(50), "
+                                + "error_message TEXT, "
+                                + "exception_class VARCHAR(255), "
+                                + "stacktrace TEXT, "
+                                + "original_data TEXT, "
+                                + "occur_time TIMESTAMP)");
+                statement.execute(
+                        "CREATE TABLE orders_transform_error_bad_sink ("
+                                + "error_stage VARCHAR(50), "
+                                + "plugin_type VARCHAR(50), "
+                                + "plugin_name VARCHAR(100), "
+                                + "source_table_path VARCHAR(255), "
+                                + "row_kind VARCHAR(20), "
+                                + "error_type VARCHAR(50), "
+                                + "error_code VARCHAR(50), "
+                                + "error_message TEXT, "
+                                + "exception_class VARCHAR(255), "
+                                + "stacktrace TEXT, "
+                                + "original_data TEXT, "
+                                + "occur_time TIMESTAMP)");
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to create tables", e);
@@ -133,6 +232,30 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     public void tearDown() throws Exception {
         if (mysqlContainer != null) {
             mysqlContainer.stop();
+        }
+    }
+
+    @BeforeEach
+    public void clearTables() throws Exception {
+        if (mysqlContainer == null) {
+            return;
+        }
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("TRUNCATE TABLE orders_from_transform");
+                statement.execute("TRUNCATE TABLE orders_transform_error");
+                statement.execute("TRUNCATE TABLE orders_transform_error_no_error");
+                statement.execute("TRUNCATE TABLE orders_transform_error_global");
+                statement.execute("TRUNCATE TABLE orders_transform_error_no_orig_stack");
+                statement.execute("TRUNCATE TABLE orders_transform_error_orig_only");
+                statement.execute("TRUNCATE TABLE orders_transform_error_drop");
+                statement.execute("TRUNCATE TABLE orders_transform_error_fail");
+                statement.execute("TRUNCATE TABLE orders_transform_error_bad_sink");
+            }
         }
     }
 
@@ -176,5 +299,207 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
             log.error("Failed to verify MySQL data", e);
             throw new RuntimeException("Failed to verify MySQL data", e);
         }
+    }
+
+    @TestTemplate
+    public void testTransformErrorHandlerWithNoErrors(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/transform_no_error_with_error_handler.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0, stderr: " + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM orders_from_transform");
+                Assertions.assertTrue(rs.next(), "Should have count result for normal rows");
+                int normalCount = rs.getInt(1);
+                Assertions.assertEquals(4, normalCount, "Should have 4 normal rows in main table");
+
+                ResultSet ers =
+                        statement.executeQuery(
+                                "SELECT COUNT(*) FROM orders_transform_error_no_error");
+                Assertions.assertTrue(ers.next(), "Should have count result for error rows");
+                int errorCount = ers.getInt(1);
+                Assertions.assertEquals(
+                        0, errorCount, "Error table should stay empty when no row errors");
+            }
+        }
+    }
+
+    @TestTemplate
+    public void testGlobalErrorHandlerRoutesTransformErrors(TestContainer container)
+            throws Exception {
+        Container.ExecResult result =
+                container.executeJob(
+                        "/transform_fakesource_to_mysql_with_global_error_handler.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0, stderr: " + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM orders_from_transform");
+                Assertions.assertTrue(rs.next(), "Should have count result for normal rows");
+                int normalCount = rs.getInt(1);
+                Assertions.assertEquals(2, normalCount, "Should have 2 normal rows in main table");
+
+                ResultSet ers =
+                        statement.executeQuery(
+                                "SELECT COUNT(*) FROM orders_transform_error_global");
+                Assertions.assertTrue(ers.next(), "Should have count result for error rows");
+                int errorCount = ers.getInt(1);
+                Assertions.assertEquals(
+                        2, errorCount, "Should have 2 error rows in global error handler table");
+            }
+        }
+    }
+
+    @TestTemplate
+    public void testErrorRowsWithoutOriginalDataAndStacktrace(TestContainer container)
+            throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/transform_error_handler_no_original_no_stacktrace.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0, stderr: " + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet ers =
+                        statement.executeQuery(
+                                "SELECT error_message, original_data, stacktrace "
+                                        + "FROM orders_transform_error_no_orig_stack");
+                int count = 0;
+                while (ers.next()) {
+                    count++;
+                    String errorMessage = ers.getString(1);
+                    String originalData = ers.getString(2);
+                    String stacktrace = ers.getString(3);
+                    Assertions.assertNotNull(
+                            errorMessage, "error_message should not be null for error rows");
+                    Assertions.assertNull(
+                            originalData,
+                            "original_data should be NULL when include_original_data=false");
+                    Assertions.assertNull(
+                            stacktrace, "stacktrace should be NULL when include_stacktrace=false");
+                }
+                Assertions.assertEquals(2, count, "Should have 2 error rows in error table");
+            }
+        }
+    }
+
+    @TestTemplate
+    public void testErrorRowsWithOriginalDataOnly(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/transform_error_handler_original_only.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0, stderr: " + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet ers =
+                        statement.executeQuery(
+                                "SELECT error_message, original_data, stacktrace "
+                                        + "FROM orders_transform_error_orig_only");
+                int count = 0;
+                while (ers.next()) {
+                    count++;
+                    String errorMessage = ers.getString(1);
+                    String originalData = ers.getString(2);
+                    String stacktrace = ers.getString(3);
+                    Assertions.assertNotNull(
+                            errorMessage, "error_message should not be null for error rows");
+                    Assertions.assertNotNull(
+                            originalData,
+                            "original_data should not be NULL when include_original_data=true");
+                    Assertions.assertNull(
+                            stacktrace, "stacktrace should be NULL when include_stacktrace=false");
+                }
+                Assertions.assertEquals(2, count, "Should have 2 error rows in error table");
+            }
+        }
+    }
+
+    @TestTemplate
+    public void testQueueOverflowDropPolicy(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/transform_error_handler_queue_drop.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0, stderr: " + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM orders_from_transform");
+                Assertions.assertTrue(rs.next(), "Should have count result for normal rows");
+                int normalCount = rs.getInt(1);
+                Assertions.assertEquals(
+                        0, normalCount, "All rows fail in transform, main table should be empty");
+
+                ResultSet ers =
+                        statement.executeQuery("SELECT COUNT(*) FROM orders_transform_error_drop");
+                Assertions.assertTrue(ers.next(), "Should have count result for error rows");
+                int errorCount = ers.getInt(1);
+                Assertions.assertTrue(
+                        errorCount >= 2 && errorCount <= 20,
+                        "Error table should contain some but not more than total error rows");
+            }
+        }
+    }
+
+    @TestTemplate
+    public void testQueueOverflowFailPolicy(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/transform_error_handler_queue_fail.conf");
+
+        Assertions.assertNotEquals(
+                0,
+                result.getExitCode(),
+                "Job should fail when queue_overflow_policy=FAIL and queue overflows");
+    }
+
+    @TestTemplate
+    public void testErrorSinkInitializationFailure(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/transform_fakesource_to_mysql_with_bad_error_sink.conf");
+
+        Assertions.assertNotEquals(
+                0, result.getExitCode(), "Job should fail when error sink initialization fails");
+        Assertions.assertTrue(
+                result.getStderr().contains("Failed to initialize error sink writer")
+                        || result.getStdout().contains("Failed to initialize error sink writer"),
+                "Logs should contain error sink initialization failure message");
     }
 }

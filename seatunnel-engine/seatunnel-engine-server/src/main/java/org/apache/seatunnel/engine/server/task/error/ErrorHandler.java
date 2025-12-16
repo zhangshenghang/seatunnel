@@ -59,48 +59,70 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
             return;
         }
 
-        try {
-            String originalData =
-                    config.isIncludeOriginalData()
-                            ? truncate(String.valueOf(row), config.getOriginalDataMaxLength())
-                            : null;
+        // Build original data safely; failures here should not kill the job.
+        String originalData = null;
+        if (config.isIncludeOriginalData()) {
+            try {
+                originalData = truncate(String.valueOf(row), config.getOriginalDataMaxLength());
+            } catch (Throwable buildEx) {
+                log.error(
+                        "Failed to build original_data for row-level error. stage={}, plugin={}, tableId={}, originalError={}",
+                        ctx != null ? ctx.getStage() : null,
+                        ctx != null ? ctx.getPluginName() : null,
+                        ctx != null ? ctx.getTableId() : null,
+                        t != null ? t.getMessage() : null,
+                        buildEx);
+            }
+        }
 
-            if (config.getMode() == ErrorHandlerMode.LOG
-                    || config.getMode() == ErrorHandlerMode.ROUTE) {
+        // Always try to log the row-level error when LOG / ROUTE is enabled.
+        if (config.getMode() == ErrorHandlerMode.LOG
+                || config.getMode() == ErrorHandlerMode.ROUTE) {
+            try {
                 log.warn(
                         "Row-level error in stage [{}], plugin [{}] on table [{}]: {}. TotalRecords={}, ErrorRecords={}, Original data: {}",
                         ctx.getStage(),
                         ctx.getPluginName(),
                         ctx.getTableId(),
-                        t.getMessage(),
+                        t != null ? t.getMessage() : null,
                         totalRecords.get(),
                         currentErrorCount,
                         originalData,
                         t);
+            } catch (Throwable logEx) {
+                log.error(
+                        "Failed to log row-level error. stage={}, plugin={}, tableId={}, originalError={}, logFailure={}",
+                        ctx != null ? ctx.getStage() : null,
+                        ctx != null ? ctx.getPluginName() : null,
+                        ctx != null ? ctx.getTableId() : null,
+                        t != null ? t.getMessage() : null,
+                        logEx.getMessage(),
+                        logEx);
             }
+        }
 
-            if (config.getMode() == ErrorHandlerMode.ROUTE && errorSinkWriter != null) {
-                try {
-                    log.info("Writing error row to sink: {}", row);
-                    errorSinkWriter.write(ctx, row, t);
-                } catch (Exception sinkEx) {
+        // In ROUTE mode, delegate to the error sink. For queue_overflow_policy = FAIL we
+        // propagate sink failures to fail the job; for DROP/BLOCK we only log and continue.
+        if (config.getMode() == ErrorHandlerMode.ROUTE && errorSinkWriter != null) {
+            try {
+                log.info("Writing error row to sink: {}", row);
+                errorSinkWriter.write(ctx, row, t);
+            } catch (Exception sinkEx) {
+                if (config.getQueueOverflowPolicy() == QueueOverflowPolicy.FAIL) {
                     throw new RuntimeException(
                             String.format(
                                     "Error sink failed for stage [%s], plugin [%s]",
                                     ctx.getStage(), ctx.getPluginName()),
                             sinkEx);
                 }
+                log.error(
+                        "Error sink failed for stage [{}], plugin [{}] with queue_overflow_policy={}, "
+                                + "job will continue running",
+                        ctx.getStage(),
+                        ctx.getPluginName(),
+                        config.getQueueOverflowPolicy(),
+                        sinkEx);
             }
-        } catch (Throwable logEx) {
-            log.error(
-                    "Failed to handle row-level error. stage={}, plugin={}, tableId={}, "
-                            + "originalError={}, handlerFailure={}",
-                    ctx != null ? ctx.getStage() : null,
-                    ctx != null ? ctx.getPluginName() : null,
-                    ctx != null ? ctx.getTableId() : null,
-                    t != null ? t.getMessage() : null,
-                    logEx.getMessage(),
-                    logEx);
         }
     }
 
