@@ -178,23 +178,38 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
             }
 
             ClassLoader contextClassLoader = errorSinkClassLoader;
-            TableSinkFactory<SeaTunnelRow, ?, ?, ?> tableSinkFactory =
-                    FactoryUtil.discoverFactory(
-                            contextClassLoader, TableSinkFactory.class, sinkConfig.getPluginName());
+            ClassLoader previousClassLoader = Thread.currentThread().getContextClassLoader();
+            SeaTunnelSink<SeaTunnelRow, ?, ?, ?> sink;
+            try {
+                // Ensure that SPI / ServiceLoader usages inside the connector (such as
+                // JdbcDialectLoader) see the dedicated error-sink classloader as the
+                // thread context classloader. Otherwise dialect discovery may fail even
+                // though the connector jars are available.
+                Thread.currentThread().setContextClassLoader(contextClassLoader);
 
-            SeaTunnelSink<SeaTunnelRow, ?, ?, ?> sink =
-                    FactoryUtil.createAndPrepareSink(
-                            catalogTable,
-                            readonlyConfig,
-                            contextClassLoader,
-                            sinkConfig.getPluginName(),
-                            pluginIdentifier ->
-                                    discovery.createPluginInstance(
-                                            PluginIdentifier.of(
-                                                    EngineType.SEATUNNEL.getEngine(),
-                                                    PluginType.SINK.getType(),
-                                                    pluginIdentifier.getPluginName())),
-                            tableSinkFactory);
+                TableSinkFactory<SeaTunnelRow, ?, ?, ?> tableSinkFactory =
+                        FactoryUtil.discoverFactory(
+                                contextClassLoader,
+                                TableSinkFactory.class,
+                                sinkConfig.getPluginName());
+
+                SeaTunnelSinkPluginDiscovery sinkDiscovery = new SeaTunnelSinkPluginDiscovery();
+                sink =
+                        FactoryUtil.createAndPrepareSink(
+                                catalogTable,
+                                readonlyConfig,
+                                contextClassLoader,
+                                sinkConfig.getPluginName(),
+                                pluginIdentifier ->
+                                        sinkDiscovery.createPluginInstance(
+                                                PluginIdentifier.of(
+                                                        EngineType.SEATUNNEL.getEngine(),
+                                                        PluginType.SINK.getType(),
+                                                        pluginIdentifier.getPluginName())),
+                                tableSinkFactory);
+            } finally {
+                Thread.currentThread().setContextClassLoader(previousClassLoader);
+            }
 
             this.errorSink = sink;
             SinkWriter.Context writerContext =
