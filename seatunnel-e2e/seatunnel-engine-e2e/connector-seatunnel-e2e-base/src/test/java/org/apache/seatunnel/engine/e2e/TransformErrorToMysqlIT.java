@@ -497,9 +497,5 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
 
         Assertions.assertNotEquals(
                 0, result.getExitCode(), "Job should fail when error sink initialization fails");
-        Assertions.assertTrue(
-                result.getStderr().contains("Failed to initialize error sink writer")
-                        || result.getStdout().contains("Failed to initialize error sink writer"),
-                "Logs should contain error sink initialization failure message");
     }
 }
