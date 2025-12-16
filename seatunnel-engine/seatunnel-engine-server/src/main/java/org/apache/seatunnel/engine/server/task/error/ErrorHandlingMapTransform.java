@@ -64,6 +64,12 @@ public class ErrorHandlingMapTransform<T> implements SeaTunnelMapTransform<T> {
                             "TRANSFORM",
                             delegate.getPluginName(),
                             resolveTableId(row));
+            log.info(
+                    "Routing transform row-level error to ErrorHandler (map), stage={}, plugin={}, tableId={}, error={}",
+                    ctx.getStage(),
+                    ctx.getPluginName(),
+                    ctx.getTableId(),
+                    t.getMessage());
             errorHandler.onError(ctx, row, t);
             return null;
         }

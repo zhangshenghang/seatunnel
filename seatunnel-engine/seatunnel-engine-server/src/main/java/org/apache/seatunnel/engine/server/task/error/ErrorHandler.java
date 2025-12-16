@@ -68,11 +68,13 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
             if (config.getMode() == ErrorHandlerMode.LOG
                     || config.getMode() == ErrorHandlerMode.ROUTE) {
                 log.warn(
-                        "Row-level error in stage [{}], plugin [{}] on table [{}]: {}. Original data: {}",
+                        "Row-level error in stage [{}], plugin [{}] on table [{}]: {}. TotalRecords={}, ErrorRecords={}, Original data: {}",
                         ctx.getStage(),
                         ctx.getPluginName(),
                         ctx.getTableId(),
                         t.getMessage(),
+                        totalRecords.get(),
+                        currentErrorCount,
                         originalData,
                         t);
             }
@@ -90,7 +92,15 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
                 }
             }
         } catch (Throwable logEx) {
-            log.debug("Failed to log row-level error", logEx);
+            log.error(
+                    "Failed to handle row-level error. stage={}, plugin={}, tableId={}, "
+                            + "originalError={}, handlerFailure={}",
+                    ctx != null ? ctx.getStage() : null,
+                    ctx != null ? ctx.getPluginName() : null,
+                    ctx != null ? ctx.getTableId() : null,
+                    t != null ? t.getMessage() : null,
+                    logEx.getMessage(),
+                    logEx);
         }
     }
 

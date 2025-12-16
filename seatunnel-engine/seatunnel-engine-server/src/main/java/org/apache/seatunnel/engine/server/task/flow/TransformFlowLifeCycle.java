@@ -69,6 +69,7 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
             Collector<Record<?>> collector,
             CompletableFuture<Void> completableFuture) {
         super(action, runningTask, completableFuture);
+        log.error("DEBUG: TransformFlowLifeCycle constructor called");
         this.action = action;
         this.transform = action.getTransforms();
         this.collector = collector;
@@ -76,6 +77,7 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
 
     @Override
     public void open() throws Exception {
+        log.error("DEBUG: TransformFlowLifeCycle open() called");
         super.open();
         initErrorHandlingTransforms();
         for (SeaTunnelTransform<T> t : transform) {
@@ -223,7 +225,17 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
 
         StageErrorConfig stageConfig =
                 ErrorHandlerConfigUtil.buildStageConfig(envOptions, StageType.TRANSFORM);
-        log.error("DEBUG: stageConfig: {}", stageConfig);
+        log.error(
+                "DEBUG: stageConfig for TRANSFORM: mode={}, sinkPlugin={}, errorTable={}, "
+                        + "queueCapacity={}, queueOverflowPolicy={}, includeOriginalData={}, includeStacktrace={}, originalDataMaxLength={}",
+                stageConfig.getMode(),
+                stageConfig.getSink() != null ? stageConfig.getSink().getPluginName() : null,
+                stageConfig.getSink() != null ? stageConfig.getSink().getErrorTable() : null,
+                stageConfig.getQueueCapacity(),
+                stageConfig.getQueueOverflowPolicy(),
+                stageConfig.isIncludeOriginalData(),
+                stageConfig.isIncludeStacktrace(),
+                stageConfig.getOriginalDataMaxLength());
 
         if (stageConfig.getMode() == ErrorHandlerMode.DISABLE) {
             log.error("DEBUG: stageConfig mode is DISABLE");
