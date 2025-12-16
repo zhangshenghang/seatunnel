@@ -29,6 +29,7 @@ import org.apache.seatunnel.engine.server.checkpoint.ActionStateKey;
 import org.apache.seatunnel.engine.server.checkpoint.ActionSubtaskState;
 import org.apache.seatunnel.engine.server.checkpoint.CheckpointBarrier;
 import org.apache.seatunnel.engine.server.task.SeaTunnelTask;
+import org.apache.seatunnel.engine.server.task.error.DefaultErrorSinkWriter;
 import org.apache.seatunnel.engine.server.task.error.DefaultRowErrorClassifier;
 import org.apache.seatunnel.engine.server.task.error.ErrorHandler;
 import org.apache.seatunnel.engine.server.task.error.ErrorHandlerConfigUtil;
@@ -36,6 +37,8 @@ import org.apache.seatunnel.engine.server.task.error.ErrorHandlerConfigUtil.Stag
 import org.apache.seatunnel.engine.server.task.error.ErrorHandlerMode;
 import org.apache.seatunnel.engine.server.task.error.ErrorHandlingFlatMapTransform;
 import org.apache.seatunnel.engine.server.task.error.ErrorHandlingMapTransform;
+import org.apache.seatunnel.engine.server.task.error.ErrorSinkConfig;
+import org.apache.seatunnel.engine.server.task.error.ErrorSinkRowWriter;
 import org.apache.seatunnel.engine.server.task.error.RowErrorClassifier;
 import org.apache.seatunnel.engine.server.task.error.StageErrorConfig;
 import org.apache.seatunnel.engine.server.task.record.Barrier;
@@ -219,7 +222,8 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
         if (stageConfig.getMode() == ErrorHandlerMode.DISABLE) {
             return;
         }
-        ErrorHandler<T> handler = new ErrorHandler<>(stageConfig);
+        ErrorSinkRowWriter<T> errorSinkWriter = createErrorSinkWriter(stageConfig);
+        ErrorHandler<T> handler = new ErrorHandler<>(stageConfig, errorSinkWriter);
         RowErrorClassifier<T> classifier = new DefaultRowErrorClassifier<>();
 
         for (int i = 0; i < transform.size(); i++) {
@@ -236,5 +240,17 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
                                 (SeaTunnelMapTransform<T>) t, handler, classifier));
             }
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private ErrorSinkRowWriter<T> createErrorSinkWriter(StageErrorConfig stageConfig) {
+        if (stageConfig.getMode() != ErrorHandlerMode.ROUTE) {
+            return null;
+        }
+        ErrorSinkConfig sinkConfig = stageConfig.getSink();
+        if (sinkConfig == null || !sinkConfig.isConfigured()) {
+            return null;
+        }
+        return (ErrorSinkRowWriter<T>) new DefaultErrorSinkWriter<>(stageConfig, sinkConfig);
     }
 }
