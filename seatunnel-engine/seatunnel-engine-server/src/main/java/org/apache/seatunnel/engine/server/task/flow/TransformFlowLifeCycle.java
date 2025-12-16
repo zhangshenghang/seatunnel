@@ -241,7 +241,7 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
             log.error("DEBUG: stageConfig mode is DISABLE");
             return;
         }
-        ErrorSinkRowWriter<T> errorSinkWriter = createErrorSinkWriter(stageConfig);
+        ErrorSinkRowWriter<T> errorSinkWriter = createErrorSinkWriter(seaTunnelTask, stageConfig);
         ErrorHandler<T> handler = new ErrorHandler<>(stageConfig, errorSinkWriter);
         RowErrorClassifier<T> classifier = new DefaultRowErrorClassifier<>();
 
@@ -265,7 +265,8 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
     }
 
     @SuppressWarnings("unchecked")
-    private ErrorSinkRowWriter<T> createErrorSinkWriter(StageErrorConfig stageConfig) {
+    private ErrorSinkRowWriter<T> createErrorSinkWriter(
+            SeaTunnelTask seaTunnelTask, StageErrorConfig stageConfig) {
         if (stageConfig.getMode() != ErrorHandlerMode.ROUTE) {
             return null;
         }
@@ -273,6 +274,11 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
         if (sinkConfig == null || !sinkConfig.isConfigured()) {
             return null;
         }
-        return (ErrorSinkRowWriter<T>) new DefaultErrorSinkWriter<>(stageConfig, sinkConfig);
+        return (ErrorSinkRowWriter<T>)
+                new DefaultErrorSinkWriter<>(
+                        stageConfig,
+                        sinkConfig,
+                        seaTunnelTask.getTaskLocation().getJobId(),
+                        seaTunnelTask.getExecutionContext().getClassLoaderService());
     }
 }

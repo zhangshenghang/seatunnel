@@ -40,7 +40,6 @@ import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
 import org.apache.seatunnel.common.constants.EngineType;
 import org.apache.seatunnel.common.constants.PluginType;
 import org.apache.seatunnel.common.exception.SeaTunnelRuntimeException;
-import org.apache.seatunnel.engine.common.loader.SeaTunnelChildFirstClassLoader;
 import org.apache.seatunnel.plugin.discovery.seatunnel.SeaTunnelSinkPluginDiscovery;
 
 import lombok.extern.slf4j.Slf4j;
@@ -69,6 +68,9 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
 
     private final StageErrorConfig stageConfig;
     private final ErrorSinkConfig sinkConfig;
+    private final long jobId;
+    private final org.apache.seatunnel.engine.core.classloader.ClassLoaderService
+            classLoaderService;
 
     private transient volatile boolean initialized;
     private transient volatile boolean closed;
@@ -81,9 +83,15 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
     private transient Thread workerThread;
     private transient ClassLoader errorSinkClassLoader;
 
-    public DefaultErrorSinkWriter(StageErrorConfig stageConfig, ErrorSinkConfig sinkConfig) {
+    public DefaultErrorSinkWriter(
+            StageErrorConfig stageConfig,
+            ErrorSinkConfig sinkConfig,
+            long jobId,
+            org.apache.seatunnel.engine.core.classloader.ClassLoaderService classLoaderService) {
         this.stageConfig = stageConfig;
         this.sinkConfig = sinkConfig;
+        this.jobId = jobId;
+        this.classLoaderService = classLoaderService;
     }
 
     @Override
@@ -155,10 +163,10 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
             CatalogTable catalogTable = buildCatalogTable(errorRowType);
             ReadonlyConfig readonlyConfig = ReadonlyConfig.fromMap(sinkConfig.getOptions());
 
-            // Build a dedicated child-first classloader for the error sink plugin so that
-            // it does not depend on the task thread's context classloader. This ensures
-            // that even when the transform task does not carry sink connector jars, the
-            // error sink can still load its own connector implementation (e.g. Jdbc).
+            // Resolve connector jars for the error sink plugin once and let the shared
+            // ClassLoaderService manage the actual classloader lifecycle, so that
+            // any background threads (such as MySQL cleanup threads) can be properly
+            // detached from this classloader when the job finishes.
             SeaTunnelSinkPluginDiscovery discovery = new SeaTunnelSinkPluginDiscovery();
             if (errorSinkClassLoader == null) {
                 PluginIdentifier pluginIdentifier =
@@ -169,11 +177,9 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                 List<URL> pluginJars =
                         discovery.getPluginJarAndDependencyPaths(
                                 Collections.singletonList(pluginIdentifier));
-                ClassLoader parentClassLoader = Thread.currentThread().getContextClassLoader();
-                errorSinkClassLoader =
-                        new SeaTunnelChildFirstClassLoader(pluginJars, parentClassLoader);
+                errorSinkClassLoader = classLoaderService.getClassLoader(jobId, pluginJars);
                 log.info(
-                        "Created dedicated error sink classloader for pluginName={}, jars={}",
+                        "Created dedicated error sink classloader via ClassLoaderService for pluginName={}, jars={}",
                         sinkConfig.getPluginName(),
                         pluginJars);
             }
