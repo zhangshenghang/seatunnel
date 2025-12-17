@@ -177,6 +177,20 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
                                 + "original_data TEXT, "
                                 + "occur_time TIMESTAMP)");
                 statement.execute(
+                        "CREATE TABLE orders_sink_error_block ("
+                                + "error_stage VARCHAR(50), "
+                                + "plugin_type VARCHAR(50), "
+                                + "plugin_name VARCHAR(100), "
+                                + "source_table_path VARCHAR(255), "
+                                + "row_kind VARCHAR(20), "
+                                + "error_type VARCHAR(50), "
+                                + "error_code VARCHAR(50), "
+                                + "error_message TEXT, "
+                                + "exception_class VARCHAR(255), "
+                                + "stacktrace TEXT, "
+                                + "original_data TEXT, "
+                                + "occur_time TIMESTAMP)");
+                statement.execute(
                         "CREATE TABLE orders_sink_error_bad_sink ("
                                 + "error_stage VARCHAR(50), "
                                 + "plugin_type VARCHAR(50), "
@@ -221,6 +235,7 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
                 statement.execute("TRUNCATE TABLE orders_sink_error_orig_only");
                 statement.execute("TRUNCATE TABLE orders_sink_error_drop");
                 statement.execute("TRUNCATE TABLE orders_sink_error_fail");
+                statement.execute("TRUNCATE TABLE orders_sink_error_block");
                 statement.execute("TRUNCATE TABLE orders_sink_error_bad_sink");
             }
         }
@@ -229,7 +244,8 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
     @TestTemplate
     public void testSinkErrorRoutedToMysql(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/error-handling/sink_fakesource_to_mysql_with_error_handler.conf");
+                container.executeJob(
+                        "/error-handling/sink_fakesource_to_mysql_with_error_handler.conf");
 
         Assertions.assertEquals(
                 0,
@@ -259,9 +275,37 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
     }
 
     @TestTemplate
+    public void testSinkErrorLogMode(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/error-handling/sink_error_handler_log_mode.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0, stderr: " + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM orders_from_sink");
+                Assertions.assertTrue(rs.next(), "Should have count result for normal rows");
+                int normalCount = rs.getInt(1);
+                Assertions.assertEquals(
+                        2,
+                        normalCount,
+                        "In LOG mode, 2 normal rows should still be written to main sink table");
+            }
+        }
+    }
+
+    @TestTemplate
     public void testSinkErrorWithoutHandlerFailsJob(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/error-handling/sink_fakesource_to_mysql_without_error_handler.conf");
+                container.executeJob(
+                        "/error-handling/sink_fakesource_to_mysql_without_error_handler.conf");
 
         Assertions.assertNotEquals(
                 0,
@@ -273,7 +317,8 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
     public void testSinkErrorRowsWithoutOriginalDataAndStacktrace(TestContainer container)
             throws Exception {
         Container.ExecResult result =
-                container.executeJob("/error-handling/sink_error_handler_no_original_no_stacktrace.conf");
+                container.executeJob(
+                        "/error-handling/sink_error_handler_no_original_no_stacktrace.conf");
 
         Assertions.assertEquals(
                 0,
@@ -350,7 +395,8 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
 
     @TestTemplate
     public void testSinkQueueOverflowDropPolicy(TestContainer container) throws Exception {
-        Container.ExecResult result = container.executeJob("/error-handling/sink_error_handler_queue_drop.conf");
+        Container.ExecResult result =
+                container.executeJob("/error-handling/sink_error_handler_queue_drop.conf");
 
         Assertions.assertEquals(
                 0,
@@ -382,7 +428,8 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
 
     @TestTemplate
     public void testSinkQueueOverflowFailPolicy(TestContainer container) throws Exception {
-        Container.ExecResult result = container.executeJob("/error-handling/sink_error_handler_queue_fail.conf");
+        Container.ExecResult result =
+                container.executeJob("/error-handling/sink_error_handler_queue_fail.conf");
 
         Assertions.assertNotEquals(
                 0,
@@ -391,13 +438,83 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
     }
 
     @TestTemplate
+    public void testSinkQueueOverflowBlockPolicy(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/error-handling/sink_error_handler_queue_block.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0, stderr: " + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM orders_from_sink");
+                Assertions.assertTrue(rs.next(), "Should have count result for normal rows");
+                int normalCount = rs.getInt(1);
+                Assertions.assertEquals(
+                        0,
+                        normalCount,
+                        "All rows fail in sink for BLOCK policy scenario, main sink table should be empty");
+
+                ResultSet ers =
+                        statement.executeQuery("SELECT COUNT(*) FROM orders_sink_error_block");
+                Assertions.assertTrue(ers.next(), "Should have count result for error rows");
+                int errorCount = ers.getInt(1);
+                Assertions.assertEquals(
+                        20,
+                        errorCount,
+                        "With BLOCK policy, all error rows should be written to the sink error table");
+            }
+        }
+    }
+
+    @TestTemplate
+    public void testSinkMaxErrorRecordsThreshold(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/error-handling/sink_error_handler_max_error_records.conf");
+
+        Assertions.assertNotEquals(
+                0,
+                result.getExitCode(),
+                "Job should fail when max_error_records is exceeded in sink stage");
+    }
+
+    @TestTemplate
+    public void testSinkMaxErrorRatioThreshold(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/error-handling/sink_error_handler_max_error_ratio.conf");
+
+        Assertions.assertNotEquals(
+                0,
+                result.getExitCode(),
+                "Job should fail when max_error_ratio is exceeded in sink stage");
+    }
+
+    @TestTemplate
     public void testSinkErrorSinkInitializationFailure(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/error-handling/sink_fakesource_to_mysql_with_bad_error_sink.conf");
+                container.executeJob(
+                        "/error-handling/sink_fakesource_to_mysql_with_bad_error_sink.conf");
 
         Assertions.assertNotEquals(
                 0,
                 result.getExitCode(),
                 "Job should fail when sink error sink initialization fails");
+    }
+
+    @TestTemplate
+    public void testSinkSystemErrorNotHandledAsRowError(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/error-handling/sink_error_handler_system_error.conf");
+
+        Assertions.assertNotEquals(
+                0,
+                result.getExitCode(),
+                "Job should fail when sink encounters a system-level error even if sink_error_handler is configured");
     }
 }

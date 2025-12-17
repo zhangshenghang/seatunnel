@@ -208,6 +208,20 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
                                 + "original_data TEXT, "
                                 + "occur_time TIMESTAMP)");
                 statement.execute(
+                        "CREATE TABLE orders_transform_error_block ("
+                                + "error_stage VARCHAR(50), "
+                                + "plugin_type VARCHAR(50), "
+                                + "plugin_name VARCHAR(100), "
+                                + "source_table_path VARCHAR(255), "
+                                + "row_kind VARCHAR(20), "
+                                + "error_type VARCHAR(50), "
+                                + "error_code VARCHAR(50), "
+                                + "error_message TEXT, "
+                                + "exception_class VARCHAR(255), "
+                                + "stacktrace TEXT, "
+                                + "original_data TEXT, "
+                                + "occur_time TIMESTAMP)");
+                statement.execute(
                         "CREATE TABLE orders_transform_error_bad_sink ("
                                 + "error_stage VARCHAR(50), "
                                 + "plugin_type VARCHAR(50), "
@@ -254,6 +268,7 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
                 statement.execute("TRUNCATE TABLE orders_transform_error_orig_only");
                 statement.execute("TRUNCATE TABLE orders_transform_error_drop");
                 statement.execute("TRUNCATE TABLE orders_transform_error_fail");
+                statement.execute("TRUNCATE TABLE orders_transform_error_block");
                 statement.execute("TRUNCATE TABLE orders_transform_error_bad_sink");
             }
         }
@@ -263,7 +278,8 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     public void testTransformErrorRoutedToMysql(TestContainer container) throws Exception {
         // No variables needed - credentials are hardcoded in the config file
         Container.ExecResult result =
-                container.executeJob("/error-handling/transform_fakesource_to_mysql_with_error_handler.conf");
+                container.executeJob(
+                        "/error-handling/transform_fakesource_to_mysql_with_error_handler.conf");
 
         Assertions.assertEquals(
                 0,
@@ -298,6 +314,33 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
         } catch (SQLException e) {
             log.error("Failed to verify MySQL data", e);
             throw new RuntimeException("Failed to verify MySQL data", e);
+        }
+    }
+
+    @TestTemplate
+    public void testTransformErrorLogMode(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/error-handling/transform_error_handler_log_mode.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0, stderr: " + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM orders_from_transform");
+                Assertions.assertTrue(rs.next(), "Should have count result for normal rows");
+                int normalCount = rs.getInt(1);
+                Assertions.assertEquals(
+                        2,
+                        normalCount,
+                        "In LOG mode, 2 normal rows should still be written to main table");
+            }
         }
     }
 
@@ -371,7 +414,8 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     public void testErrorRowsWithoutOriginalDataAndStacktrace(TestContainer container)
             throws Exception {
         Container.ExecResult result =
-                container.executeJob("/error-handling/transform_error_handler_no_original_no_stacktrace.conf");
+                container.executeJob(
+                        "/error-handling/transform_error_handler_no_original_no_stacktrace.conf");
 
         Assertions.assertEquals(
                 0,
@@ -491,9 +535,70 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     }
 
     @TestTemplate
+    public void testQueueOverflowBlockPolicy(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/error-handling/transform_error_handler_queue_block.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0, stderr: " + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM orders_from_transform");
+                Assertions.assertTrue(rs.next(), "Should have count result for normal rows");
+                int normalCount = rs.getInt(1);
+                Assertions.assertEquals(
+                        0,
+                        normalCount,
+                        "All rows fail in transform for BLOCK policy scenario, main table should be empty");
+
+                ResultSet ers =
+                        statement.executeQuery("SELECT COUNT(*) FROM orders_transform_error_block");
+                Assertions.assertTrue(ers.next(), "Should have count result for error rows");
+                int errorCount = ers.getInt(1);
+                Assertions.assertEquals(
+                        20,
+                        errorCount,
+                        "With BLOCK policy, all error rows should be written to the error table");
+            }
+        }
+    }
+
+    @TestTemplate
+    public void testTransformMaxErrorRecordsThreshold(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob(
+                        "/error-handling/transform_error_handler_max_error_records.conf");
+
+        Assertions.assertNotEquals(
+                0,
+                result.getExitCode(),
+                "Job should fail when max_error_records is exceeded in transform stage");
+    }
+
+    @TestTemplate
+    public void testTransformMaxErrorRatioThreshold(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob(
+                        "/error-handling/transform_error_handler_max_error_ratio.conf");
+
+        Assertions.assertNotEquals(
+                0,
+                result.getExitCode(),
+                "Job should fail when max_error_ratio is exceeded in transform stage");
+    }
+
+    @TestTemplate
     public void testErrorSinkInitializationFailure(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/error-handling/transform_fakesource_to_mysql_with_bad_error_sink.conf");
+                container.executeJob(
+                        "/error-handling/transform_fakesource_to_mysql_with_bad_error_sink.conf");
 
         Assertions.assertNotEquals(
                 0, result.getExitCode(), "Job should fail when error sink initialization fails");
