@@ -229,7 +229,7 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
     @TestTemplate
     public void testSinkErrorRoutedToMysql(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/sink_fakesource_to_mysql_with_error_handler.conf");
+                container.executeJob("/error-handling/sink_fakesource_to_mysql_with_error_handler.conf");
 
         Assertions.assertEquals(
                 0,
@@ -261,7 +261,7 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
     @TestTemplate
     public void testSinkErrorWithoutHandlerFailsJob(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/sink_fakesource_to_mysql_without_error_handler.conf");
+                container.executeJob("/error-handling/sink_fakesource_to_mysql_without_error_handler.conf");
 
         Assertions.assertNotEquals(
                 0,
@@ -273,7 +273,7 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
     public void testSinkErrorRowsWithoutOriginalDataAndStacktrace(TestContainer container)
             throws Exception {
         Container.ExecResult result =
-                container.executeJob("/sink_error_handler_no_original_no_stacktrace.conf");
+                container.executeJob("/error-handling/sink_error_handler_no_original_no_stacktrace.conf");
 
         Assertions.assertEquals(
                 0,
@@ -312,7 +312,7 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
     @TestTemplate
     public void testSinkErrorRowsWithOriginalDataOnly(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/sink_error_handler_original_only.conf");
+                container.executeJob("/error-handling/sink_error_handler_original_only.conf");
 
         Assertions.assertEquals(
                 0,
@@ -350,7 +350,7 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
 
     @TestTemplate
     public void testSinkQueueOverflowDropPolicy(TestContainer container) throws Exception {
-        Container.ExecResult result = container.executeJob("/sink_error_handler_queue_drop.conf");
+        Container.ExecResult result = container.executeJob("/error-handling/sink_error_handler_queue_drop.conf");
 
         Assertions.assertEquals(
                 0,
@@ -382,7 +382,7 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
 
     @TestTemplate
     public void testSinkQueueOverflowFailPolicy(TestContainer container) throws Exception {
-        Container.ExecResult result = container.executeJob("/sink_error_handler_queue_fail.conf");
+        Container.ExecResult result = container.executeJob("/error-handling/sink_error_handler_queue_fail.conf");
 
         Assertions.assertNotEquals(
                 0,
@@ -393,7 +393,7 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
     @TestTemplate
     public void testSinkErrorSinkInitializationFailure(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/sink_fakesource_to_mysql_with_bad_error_sink.conf");
+                container.executeJob("/error-handling/sink_fakesource_to_mysql_with_bad_error_sink.conf");
 
         Assertions.assertNotEquals(
                 0,

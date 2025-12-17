@@ -263,7 +263,7 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     public void testTransformErrorRoutedToMysql(TestContainer container) throws Exception {
         // No variables needed - credentials are hardcoded in the config file
         Container.ExecResult result =
-                container.executeJob("/transform_fakesource_to_mysql_with_error_handler.conf");
+                container.executeJob("/error-handling/transform_fakesource_to_mysql_with_error_handler.conf");
 
         Assertions.assertEquals(
                 0,
@@ -304,7 +304,7 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     @TestTemplate
     public void testTransformErrorHandlerWithNoErrors(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/transform_no_error_with_error_handler.conf");
+                container.executeJob("/error-handling/transform_no_error_with_error_handler.conf");
 
         Assertions.assertEquals(
                 0,
@@ -338,7 +338,7 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
             throws Exception {
         Container.ExecResult result =
                 container.executeJob(
-                        "/transform_fakesource_to_mysql_with_global_error_handler.conf");
+                        "/error-handling/transform_fakesource_to_mysql_with_global_error_handler.conf");
 
         Assertions.assertEquals(
                 0,
@@ -371,7 +371,7 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     public void testErrorRowsWithoutOriginalDataAndStacktrace(TestContainer container)
             throws Exception {
         Container.ExecResult result =
-                container.executeJob("/transform_error_handler_no_original_no_stacktrace.conf");
+                container.executeJob("/error-handling/transform_error_handler_no_original_no_stacktrace.conf");
 
         Assertions.assertEquals(
                 0,
@@ -410,7 +410,7 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     @TestTemplate
     public void testErrorRowsWithOriginalDataOnly(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/transform_error_handler_original_only.conf");
+                container.executeJob("/error-handling/transform_error_handler_original_only.conf");
 
         Assertions.assertEquals(
                 0,
@@ -449,7 +449,7 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     @TestTemplate
     public void testQueueOverflowDropPolicy(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/transform_error_handler_queue_drop.conf");
+                container.executeJob("/error-handling/transform_error_handler_queue_drop.conf");
 
         Assertions.assertEquals(
                 0,
@@ -482,7 +482,7 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     @TestTemplate
     public void testQueueOverflowFailPolicy(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/transform_error_handler_queue_fail.conf");
+                container.executeJob("/error-handling/transform_error_handler_queue_fail.conf");
 
         Assertions.assertNotEquals(
                 0,
@@ -493,7 +493,7 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     @TestTemplate
     public void testErrorSinkInitializationFailure(TestContainer container) throws Exception {
         Container.ExecResult result =
-                container.executeJob("/transform_fakesource_to_mysql_with_bad_error_sink.conf");
+                container.executeJob("/error-handling/transform_fakesource_to_mysql_with_bad_error_sink.conf");
 
         Assertions.assertNotEquals(
                 0, result.getExitCode(), "Job should fail when error sink initialization fails");
