@@ -345,6 +345,19 @@ public class TransformErrorToMysqlIT extends TestSuiteBase implements TestResour
     }
 
     @TestTemplate
+    public void testTransformLogModeMaxErrorRecordsThreshold(TestContainer container)
+            throws Exception {
+        Container.ExecResult result =
+                container.executeJob(
+                        "/error-handling/transform_error_handler_log_max_error_records.conf");
+
+        Assertions.assertNotEquals(
+                0,
+                result.getExitCode(),
+                "Job should fail when max_error_records is exceeded in transform stage even in LOG mode");
+    }
+
+    @TestTemplate
     public void testTransformErrorHandlerWithNoErrors(TestContainer container) throws Exception {
         Container.ExecResult result =
                 container.executeJob("/error-handling/transform_no_error_with_error_handler.conf");

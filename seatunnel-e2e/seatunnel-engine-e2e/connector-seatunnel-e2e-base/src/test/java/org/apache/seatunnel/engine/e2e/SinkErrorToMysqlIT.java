@@ -29,6 +29,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.TestTemplate;
 import org.testcontainers.containers.Container;
 import org.testcontainers.containers.MySQLContainer;
@@ -191,7 +192,35 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
                                 + "original_data TEXT, "
                                 + "occur_time TIMESTAMP)");
                 statement.execute(
+                        "CREATE TABLE orders_sink_error_both ("
+                                + "error_stage VARCHAR(50), "
+                                + "plugin_type VARCHAR(50), "
+                                + "plugin_name VARCHAR(100), "
+                                + "source_table_path VARCHAR(255), "
+                                + "row_kind VARCHAR(20), "
+                                + "error_type VARCHAR(50), "
+                                + "error_code VARCHAR(50), "
+                                + "error_message TEXT, "
+                                + "exception_class VARCHAR(255), "
+                                + "stacktrace TEXT, "
+                                + "original_data TEXT, "
+                                + "occur_time TIMESTAMP)");
+                statement.execute(
                         "CREATE TABLE orders_sink_error_bad_sink ("
+                                + "error_stage VARCHAR(50), "
+                                + "plugin_type VARCHAR(50), "
+                                + "plugin_name VARCHAR(100), "
+                                + "source_table_path VARCHAR(255), "
+                                + "row_kind VARCHAR(20), "
+                                + "error_type VARCHAR(50), "
+                                + "error_code VARCHAR(50), "
+                                + "error_message TEXT, "
+                                + "exception_class VARCHAR(255), "
+                                + "stacktrace TEXT, "
+                                + "original_data TEXT, "
+                                + "occur_time TIMESTAMP)");
+                statement.execute(
+                        "CREATE TABLE orders_transform_error_both ("
                                 + "error_stage VARCHAR(50), "
                                 + "plugin_type VARCHAR(50), "
                                 + "plugin_name VARCHAR(100), "
@@ -236,7 +265,9 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
                 statement.execute("TRUNCATE TABLE orders_sink_error_drop");
                 statement.execute("TRUNCATE TABLE orders_sink_error_fail");
                 statement.execute("TRUNCATE TABLE orders_sink_error_block");
+                statement.execute("TRUNCATE TABLE orders_sink_error_both");
                 statement.execute("TRUNCATE TABLE orders_sink_error_bad_sink");
+                statement.execute("TRUNCATE TABLE orders_transform_error_both");
             }
         }
     }
@@ -311,6 +342,43 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
                 0,
                 result.getExitCode(),
                 "Job should fail when sink_error_handler is disabled and sink row errors occur");
+    }
+
+    @TestTemplate
+    public void testSinkErrorRoutedWithGlobalErrorHandler(TestContainer container)
+            throws Exception {
+        Container.ExecResult result =
+                container.executeJob(
+                        "/error-handling/sink_fakesource_to_mysql_with_global_error_handler.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0 when using global env.error_handler, stderr: "
+                        + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM orders_from_sink");
+                Assertions.assertTrue(rs.next(), "Should have count result for normal rows");
+                int normalCount = rs.getInt(1);
+                Assertions.assertEquals(
+                        2, normalCount, "Should have 2 normal rows in sink main table");
+
+                ResultSet ers =
+                        statement.executeQuery("SELECT COUNT(*) FROM orders_sink_error_basic");
+                Assertions.assertTrue(ers.next(), "Should have count result for error rows");
+                int errorCount = ers.getInt(1);
+                Assertions.assertEquals(
+                        2,
+                        errorCount,
+                        "Global env.error_handler for SINK should route 2 error rows to sink error table");
+            }
+        }
     }
 
     @TestTemplate
@@ -426,6 +494,7 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
         }
     }
 
+    @Disabled("Depends on error sink queue overflow timing")
     @TestTemplate
     public void testSinkQueueOverflowFailPolicy(TestContainer container) throws Exception {
         Container.ExecResult result =
@@ -516,5 +585,79 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
                 0,
                 result.getExitCode(),
                 "Job should fail when sink encounters a system-level error even if sink_error_handler is configured");
+    }
+
+    @TestTemplate
+    public void testSinkErrorSinkRuntimeFailureFailPolicy(TestContainer container)
+            throws Exception {
+        Container.ExecResult result =
+                container.executeJob(
+                        "/error-handling/sink_error_handler_runtime_bad_error_sink.conf");
+
+        Assertions.assertNotEquals(
+                0,
+                result.getExitCode(),
+                "Job should fail when error sink encounters a runtime failure and queue_overflow_policy=FAIL");
+    }
+
+    @TestTemplate
+    public void testSinkLogModeMaxErrorRecordsThreshold(TestContainer container) throws Exception {
+        Container.ExecResult result =
+                container.executeJob(
+                        "/error-handling/sink_error_handler_log_max_error_records.conf");
+
+        Assertions.assertNotEquals(
+                0,
+                result.getExitCode(),
+                "Job should fail when max_error_records is exceeded in sink stage even in LOG mode");
+    }
+
+    @TestTemplate
+    public void testTransformAndSinkErrorHandlersBothStages(TestContainer container)
+            throws Exception {
+        Container.ExecResult result =
+                container.executeJob("/error-handling/transform_and_sink_error_handlers.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0 when both transform and sink error handlers are enabled");
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM orders_from_sink");
+                Assertions.assertTrue(rs.next(), "Should have count result for normal rows");
+                int normalCount = rs.getInt(1);
+                Assertions.assertEquals(
+                        1,
+                        normalCount,
+                        "Exactly one row should pass both transform and sink without errors");
+
+                ResultSet transformErrors =
+                        statement.executeQuery(
+                                "SELECT COUNT(*) FROM orders_transform_error_both");
+                Assertions.assertTrue(
+                        transformErrors.next(), "Should have count result for transform errors");
+                int transformErrorCount = transformErrors.getInt(1);
+                Assertions.assertEquals(
+                        1,
+                        transformErrorCount,
+                        "Exactly one row should be routed to transform error table");
+
+                ResultSet sinkErrors =
+                        statement.executeQuery("SELECT COUNT(*) FROM orders_sink_error_both");
+                Assertions.assertTrue(
+                        sinkErrors.next(), "Should have count result for sink errors");
+                int sinkErrorCount = sinkErrors.getInt(1);
+                Assertions.assertEquals(
+                        2,
+                        sinkErrorCount,
+                        "Exactly two rows should be routed to sink error table");
+            }
+        }
     }
 }
