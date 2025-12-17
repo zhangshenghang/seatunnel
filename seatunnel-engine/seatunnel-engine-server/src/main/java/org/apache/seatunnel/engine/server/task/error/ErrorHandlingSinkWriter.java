@@ -132,6 +132,16 @@ public class ErrorHandlingSinkWriter<T, CommT, StateT> implements SinkWriter<T, 
 
     @Override
     public void close() throws IOException {
-        delegate.close();
+        try {
+            delegate.close();
+        } finally {
+            if (errorHandler != null) {
+                try {
+                    errorHandler.close();
+                } catch (Exception e) {
+                    log.error("Failed to close ErrorHandler for sink writer", e);
+                }
+            }
+        }
     }
 }

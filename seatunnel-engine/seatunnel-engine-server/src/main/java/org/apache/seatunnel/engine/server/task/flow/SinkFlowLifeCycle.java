@@ -26,6 +26,7 @@ import org.apache.seatunnel.api.sink.SinkWriter.Context;
 import org.apache.seatunnel.api.sink.SupportSchemaEvolutionSinkWriter;
 import org.apache.seatunnel.api.sink.event.WriterCloseEvent;
 import org.apache.seatunnel.api.sink.multitablesink.MultiTableSink;
+import org.apache.seatunnel.api.sink.multitablesink.MultiTableSinkWriter;
 import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.api.table.schema.event.SchemaChangeEvent;
@@ -44,6 +45,7 @@ import org.apache.seatunnel.engine.server.task.SeaTunnelTask;
 import org.apache.seatunnel.engine.server.task.context.SinkWriterContext;
 import org.apache.seatunnel.engine.server.task.error.DefaultErrorSinkWriter;
 import org.apache.seatunnel.engine.server.task.error.DefaultRowErrorClassifier;
+import org.apache.seatunnel.engine.server.task.error.EngineMultiTableRowErrorHandler;
 import org.apache.seatunnel.engine.server.task.error.ErrorHandler;
 import org.apache.seatunnel.engine.server.task.error.ErrorHandlerConfigUtil;
 import org.apache.seatunnel.engine.server.task.error.ErrorHandlerConfigUtil.StageType;
@@ -376,6 +378,19 @@ public class SinkFlowLifeCycle<T, CommitInfoT extends Serializable, AggregatedCo
         ErrorHandler<T> handler = new ErrorHandler<>(stageConfig, errorSinkWriter);
         RowErrorClassifier<T> classifier = new DefaultRowErrorClassifier<>();
         String pluginName = sinkAction.getSink().getPluginName();
+
+        if (this.writer instanceof MultiTableSinkWriter) {
+            @SuppressWarnings("unchecked")
+            MultiTableSinkWriter multiTableSinkWriter = (MultiTableSinkWriter) this.writer;
+            @SuppressWarnings("unchecked")
+            ErrorHandler<SeaTunnelRow> rowHandler = (ErrorHandler<SeaTunnelRow>) handler;
+            @SuppressWarnings("unchecked")
+            RowErrorClassifier<SeaTunnelRow> rowClassifier =
+                    (RowErrorClassifier<SeaTunnelRow>) classifier;
+            multiTableSinkWriter.setRowErrorHandler(
+                    new EngineMultiTableRowErrorHandler(rowHandler, rowClassifier, pluginName));
+        }
+
         this.writer = new ErrorHandlingSinkWriter<>(this.writer, handler, classifier, pluginName);
     }
 

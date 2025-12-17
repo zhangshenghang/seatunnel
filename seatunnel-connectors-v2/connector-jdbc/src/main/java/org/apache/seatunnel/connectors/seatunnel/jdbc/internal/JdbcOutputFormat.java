@@ -117,6 +117,23 @@ public class JdbcOutputFormat<I, E extends JdbcBatchStatementExecutor<I>> implem
         jdbcStatementExecutor.addToBatch(record);
     }
 
+    /**
+     * Clear any pending batched statements without executing them.
+     *
+     * <p>Used by sink implementations that perform row-level error handling to discard in-memory
+     * batches after a failed write so that subsequent flush operations do not repeatedly fail on
+     * the same bad data.
+     */
+    public synchronized void clearBatchSilently() {
+        try {
+            jdbcStatementExecutor.clearBatch();
+        } catch (SQLException e) {
+            LOG.warn("Failed to clear JDBC batch after row-level error", e);
+        } finally {
+            batchCount = 0;
+        }
+    }
+
     public synchronized void flush() throws IOException {
         if (flushException != null) {
             LOG.warn(

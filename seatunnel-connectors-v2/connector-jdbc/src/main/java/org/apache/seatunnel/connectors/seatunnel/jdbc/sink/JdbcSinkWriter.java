@@ -19,6 +19,7 @@ package org.apache.seatunnel.connectors.seatunnel.jdbc.sink;
 
 import org.apache.seatunnel.shade.com.zaxxer.hikari.HikariDataSource;
 
+import org.apache.seatunnel.api.common.SupportRowLevelError;
 import org.apache.seatunnel.api.sink.MultiTableResourceManager;
 import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.api.table.catalog.TableSchema;
@@ -47,7 +48,8 @@ import java.util.List;
 import java.util.Optional;
 
 @Slf4j
-public class JdbcSinkWriter extends AbstractJdbcSinkWriter<ConnectionPoolManager> {
+public class JdbcSinkWriter extends AbstractJdbcSinkWriter<ConnectionPoolManager>
+        implements SupportRowLevelError<SeaTunnelRow> {
     private final Integer primaryKeyIndex;
     private SchemaCoordinator schemaCoordinator;
 
@@ -157,7 +159,44 @@ public class JdbcSinkWriter extends AbstractJdbcSinkWriter<ConnectionPoolManager
         }
 
         tryOpen();
-        outputFormat.writeRecord(element);
+        try {
+            outputFormat.writeRecord(element);
+        } catch (JdbcConnectorException e) {
+            // For row-level data/constraint errors we clear the pending JDBC batch so that
+            // the failed record (and any other in-memory statements) are not retried again
+            // during subsequent flush/prepareCommit calls. The engine-side error handler will
+            // decide whether to route or fail the job based on isRowError(...).
+            if (isRowLevelDataError(e)) {
+                outputFormat.clearBatchSilently();
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public boolean isRowError(Throwable t, SeaTunnelRow row) {
+        return isRowLevelDataError(t);
+    }
+
+    private boolean isRowLevelDataError(Throwable t) {
+        // Be conservative: only treat certain SQL data / constraint violations as row-level
+        // errors, so that network / connection issues still fail the whole job.
+        Throwable cause = t;
+        while (cause != null) {
+            if (cause instanceof SQLException) {
+                SQLException sqlException = (SQLException) cause;
+                String sqlState = sqlException.getSQLState();
+                if (sqlState != null) {
+                    // 22XXX: Data exception (e.g. data too long, invalid data)
+                    // 23XXX: Integrity constraint violation (e.g. duplicate key)
+                    if (sqlState.startsWith("22") || sqlState.startsWith("23")) {
+                        return true;
+                    }
+                }
+            }
+            cause = cause.getCause();
+        }
+        return false;
     }
 
     @Override
