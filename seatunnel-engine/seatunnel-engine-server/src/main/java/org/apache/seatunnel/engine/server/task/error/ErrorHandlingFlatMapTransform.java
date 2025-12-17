@@ -134,9 +134,6 @@ public class ErrorHandlingFlatMapTransform<T> implements SeaTunnelFlatMapTransfo
     @Override
     public void close() {
         delegate.close();
-        if (errorHandler != null) {
-            errorHandler.close();
-        }
     }
 
     @Override

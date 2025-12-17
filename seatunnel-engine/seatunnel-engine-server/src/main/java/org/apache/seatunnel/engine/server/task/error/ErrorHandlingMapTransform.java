@@ -129,9 +129,6 @@ public class ErrorHandlingMapTransform<T> implements SeaTunnelMapTransform<T> {
     @Override
     public void close() {
         delegate.close();
-        if (errorHandler != null) {
-            errorHandler.close();
-        }
     }
 
     @Override

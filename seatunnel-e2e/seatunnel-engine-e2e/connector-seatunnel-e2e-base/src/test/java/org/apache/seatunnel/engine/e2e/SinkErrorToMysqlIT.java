@@ -638,8 +638,7 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
                         "Exactly one row should pass both transform and sink without errors");
 
                 ResultSet transformErrors =
-                        statement.executeQuery(
-                                "SELECT COUNT(*) FROM orders_transform_error_both");
+                        statement.executeQuery("SELECT COUNT(*) FROM orders_transform_error_both");
                 Assertions.assertTrue(
                         transformErrors.next(), "Should have count result for transform errors");
                 int transformErrorCount = transformErrors.getInt(1);
@@ -654,9 +653,7 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
                         sinkErrors.next(), "Should have count result for sink errors");
                 int sinkErrorCount = sinkErrors.getInt(1);
                 Assertions.assertEquals(
-                        2,
-                        sinkErrorCount,
-                        "Exactly two rows should be routed to sink error table");
+                        2, sinkErrorCount, "Exactly two rows should be routed to sink error table");
             }
         }
     }

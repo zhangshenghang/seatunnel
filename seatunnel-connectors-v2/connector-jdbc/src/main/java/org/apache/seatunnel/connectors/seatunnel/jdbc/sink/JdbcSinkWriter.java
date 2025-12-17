@@ -167,6 +167,7 @@ public class JdbcSinkWriter extends AbstractJdbcSinkWriter<ConnectionPoolManager
             // during subsequent flush/prepareCommit calls. The engine-side error handler will
             // decide whether to route or fail the job based on isRowError(...).
             if (isRowLevelDataError(e)) {
+                // TODO achieves precise error data filtering
                 outputFormat.clearBatchSilently();
             }
             throw e;

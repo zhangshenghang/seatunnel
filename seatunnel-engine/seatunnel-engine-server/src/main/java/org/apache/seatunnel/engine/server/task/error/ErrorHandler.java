@@ -138,7 +138,9 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
                             config.getMaxErrorRecords()));
         }
 
-        if (config.getMaxErrorRatio() > 0 && total > 0) {
+        // It takes more than 100 entries to take effect, avoiding the first entry being incorrect
+        // and failing directly
+        if (config.getMaxErrorRatio() > 0 && total > 100) {
             double ratio = (double) currentErrorCount / (double) total;
             if (ratio > config.getMaxErrorRatio()) {
                 throw new RuntimeException(

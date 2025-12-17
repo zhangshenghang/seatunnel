@@ -63,6 +63,8 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
 
     private final Collector<Record<?>> collector;
 
+    private ErrorHandler<T> errorHandler;
+
     public TransformFlowLifeCycle(
             TransformChainAction<T> action,
             SeaTunnelTask runningTask,
@@ -211,6 +213,13 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
                         e);
             }
         }
+        if (errorHandler != null) {
+            try {
+                errorHandler.close();
+            } catch (Exception e) {
+                log.error("Close ErrorHandler for transform stage failed", e);
+            }
+        }
         super.close();
     }
 
@@ -243,6 +252,7 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
         }
         ErrorSinkRowWriter<T> errorSinkWriter = createErrorSinkWriter(seaTunnelTask, stageConfig);
         ErrorHandler<T> handler = new ErrorHandler<>(stageConfig, errorSinkWriter);
+        this.errorHandler = handler;
         RowErrorClassifier<T> classifier = new DefaultRowErrorClassifier<>();
 
         for (int i = 0; i < transform.size(); i++) {
