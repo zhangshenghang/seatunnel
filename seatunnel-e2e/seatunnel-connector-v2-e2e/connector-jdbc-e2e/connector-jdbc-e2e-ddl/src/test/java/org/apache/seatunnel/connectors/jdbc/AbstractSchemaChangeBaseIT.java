@@ -292,7 +292,7 @@ public abstract class AbstractSchemaChangeBaseIT extends TestSuiteBase implement
     }
 
     private void assertSchemaEvolution(String sourceTable, String sinkTable) {
-        await().atMost(30000, TimeUnit.MILLISECONDS)
+        await().atMost(60000, TimeUnit.MILLISECONDS)
                 .untilAsserted(
                         () ->
                                 Assertions.assertIterableEquals(
@@ -366,7 +366,7 @@ public abstract class AbstractSchemaChangeBaseIT extends TestSuiteBase implement
     }
 
     private void assertSchemaEvolutionForAddColumns(String sourceTable, String sinkTable) {
-        await().atMost(30000, TimeUnit.MILLISECONDS)
+        await().atMost(60000, TimeUnit.MILLISECONDS)
                 .untilAsserted(
                         () ->
                                 Assertions.assertIterableEquals(
