@@ -52,6 +52,9 @@ public class ErrorHandlingMapTransform<T> implements SeaTunnelMapTransform<T> {
         try {
             return delegate.map(row);
         } catch (Throwable t) {
+            if (t instanceof Error) {
+                throw (Error) t;
+            }
             if (errorHandler == null || !isRowError(row, t)) {
                 if (t instanceof RuntimeException) {
                     throw (RuntimeException) t;
@@ -76,6 +79,9 @@ public class ErrorHandlingMapTransform<T> implements SeaTunnelMapTransform<T> {
                 return ((SupportRowLevelError<T>) delegate).isRowError(t, row);
             }
         } catch (Throwable ex) {
+            if (ex instanceof Error) {
+                throw (Error) ex;
+            }
             log.debug(
                     "SupportRowLevelError.isRowError threw exception, fallback to classifier", ex);
         }

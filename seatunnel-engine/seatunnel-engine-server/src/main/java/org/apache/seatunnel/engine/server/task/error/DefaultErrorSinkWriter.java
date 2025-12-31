@@ -177,8 +177,6 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                     sinkConfig.getErrorTable(),
                     sinkConfig.getOptions());
             this.errorRowType = buildErrorRowType();
-            CatalogTable catalogTable = buildCatalogTable(errorRowType);
-            ReadonlyConfig readonlyConfig = ReadonlyConfig.fromMap(sinkConfig.getOptions());
 
             // Resolve connector jars for the error sink plugin once and let the shared
             // ClassLoaderService manage the actual classloader lifecycle, so that
@@ -217,6 +215,10 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                                 contextClassLoader,
                                 TableSinkFactory.class,
                                 sinkConfig.getPluginName());
+
+                Map<String, Object> connectorOptions = sinkConfig.getOptions();
+                CatalogTable catalogTable = buildCatalogTable(errorRowType, connectorOptions);
+                ReadonlyConfig readonlyConfig = ReadonlyConfig.fromMap(connectorOptions);
 
                 SeaTunnelSinkPluginDiscovery sinkDiscovery = new SeaTunnelSinkPluginDiscovery();
                 sink =
@@ -258,6 +260,9 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
             this.workerThread.start();
             initialized = true;
         } catch (Throwable e) {
+            if (e instanceof Error) {
+                throw (Error) e;
+            }
             log.error(
                     "Failed to initialize error sink writer for pluginName={}, errorTable={}, options={}",
                     sinkConfig.getPluginName(),
@@ -267,6 +272,9 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
             try {
                 closeWriterIfPossible();
             } catch (Throwable closeEx) {
+                if (closeEx instanceof Error) {
+                    throw (Error) closeEx;
+                }
                 e.addSuppressed(closeEx);
             }
             releaseErrorSinkClassLoaderIfNeeded();
@@ -290,6 +298,10 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                 sinkWriter.write(row);
             }
         } catch (Throwable e) {
+            if (e instanceof Error) {
+                workerFailure = e;
+                throw (Error) e;
+            }
             workerFailure = e;
             log.error("Error sink writer failed", e);
         } finally {
@@ -298,6 +310,9 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                     sinkWriter.close();
                 }
             } catch (Throwable closeEx) {
+                if (closeEx instanceof Error) {
+                    throw (Error) closeEx;
+                }
                 if (workerFailure != null) {
                     workerFailure.addSuppressed(closeEx);
                 } else {
@@ -365,6 +380,9 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
         try {
             classLoaderService.releaseClassLoader(jobId, jars);
         } catch (Throwable e) {
+            if (e instanceof Error) {
+                throw (Error) e;
+            }
             log.warn(
                     "Failed to release error sink classloader for jobId={}, pluginName={}, jars={}",
                     jobId,
@@ -405,7 +423,8 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                 fieldNames.toArray(new String[0]), fieldTypes.toArray(new SeaTunnelDataType[0]));
     }
 
-    private CatalogTable buildCatalogTable(SeaTunnelRowType rowType) {
+    private CatalogTable buildCatalogTable(
+            SeaTunnelRowType rowType, Map<String, Object> optionsMap) {
         List<PhysicalColumn> columns = new ArrayList<>();
         for (int i = 0; i < rowType.getTotalFields(); i++) {
             columns.add(
@@ -429,14 +448,7 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
         TableIdentifier tableId = TableIdentifier.of("error_sink", null, tableName);
 
         Map<String, String> options = new HashMap<>();
-        sinkConfig
-                .getOptions()
-                .forEach((k, v) -> options.put(k, v == null ? null : String.valueOf(v)));
-
-        // Ensure error rows are flushed even when the total volume is small.
-        // For connectors like Jdbc this means every error row is written immediately
-        // instead of being buffered indefinitely waiting for a checkpoint/close.
-        options.putIfAbsent("batch_size", "1");
+        optionsMap.forEach((k, v) -> options.put(k, v == null ? null : String.valueOf(v)));
 
         return CatalogTable.of(tableId, tableSchema, options, new ArrayList<>(), null);
     }

@@ -31,6 +31,14 @@ public final class StageErrorConfig implements Serializable {
     private final ErrorSinkConfig sink;
 
     private final double maxErrorRatio;
+    /**
+     * Warm-up threshold for {@link #maxErrorRatio} to take effect.
+     *
+     * <p>When total processed records is less than this value, maxErrorRatio check will be skipped
+     * to avoid failing the job too early due to unstable ratio on very small samples.
+     */
+    private final int maxErrorRatioMinRecords;
+
     private final long maxErrorRecords;
 
     private final int queueCapacity;

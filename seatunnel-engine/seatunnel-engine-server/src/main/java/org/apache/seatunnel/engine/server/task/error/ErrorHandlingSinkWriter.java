@@ -62,6 +62,9 @@ public class ErrorHandlingSinkWriter<T, CommT, StateT> implements SinkWriter<T, 
         try {
             delegate.write(element);
         } catch (Throwable ex) {
+            if (ex instanceof Error) {
+                throw (Error) ex;
+            }
             if (errorHandler == null || !isRowError(element, ex)) {
                 if (ex instanceof IOException) {
                     throw (IOException) ex;
@@ -85,6 +88,9 @@ public class ErrorHandlingSinkWriter<T, CommT, StateT> implements SinkWriter<T, 
                 return ((SupportRowLevelError<T>) delegate).isRowError(t, row);
             }
         } catch (Throwable ex) {
+            if (ex instanceof Error) {
+                throw (Error) ex;
+            }
             log.debug(
                     "SupportRowLevelError.isRowError threw exception, fallback to classifier", ex);
         }

@@ -68,6 +68,9 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
             try {
                 originalData = truncate(String.valueOf(row), config.getOriginalDataMaxLength());
             } catch (Throwable buildEx) {
+                if (buildEx instanceof Error) {
+                    throw (Error) buildEx;
+                }
                 log.error(
                         "Failed to build original_data for row-level error. stage={}, plugin={}, tableId={}, originalError={}",
                         ctx != null ? ctx.getStage() : null,
@@ -110,6 +113,9 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
                             originalData);
                 }
             } catch (Throwable logEx) {
+                if (logEx instanceof Error) {
+                    throw (Error) logEx;
+                }
                 log.error(
                         "Failed to log row-level error. stage={}, plugin={}, tableId={}, originalError={}, logFailure={}",
                         ctx != null ? ctx.getStage() : null,
@@ -158,9 +164,11 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
                             config.getMaxErrorRecords()));
         }
 
-        // It takes more than 100 entries to take effect, avoiding the first entry being incorrect
-        // and failing directly
-        if (config.getMaxErrorRatio() > 0 && total > 100) {
+        // Error ratio can be very unstable for tiny samples, so we only enable ratio checks after
+        // a configurable warm-up threshold (max_error_ratio_min_records).
+        int minTotalForRatio =
+                config.getMaxErrorRatioMinRecords() > 0 ? config.getMaxErrorRatioMinRecords() : 1;
+        if (config.getMaxErrorRatio() > 0 && total >= minTotalForRatio) {
             double ratio = (double) currentErrorCount / (double) total;
             if (ratio > config.getMaxErrorRatio()) {
                 throw new RuntimeException(

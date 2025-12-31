@@ -56,6 +56,8 @@ public final class ErrorHandlerConfigUtil {
         ErrorHandlerMode mode = ErrorHandlerMode.fromString(modeStr);
 
         double maxErrorRatio = getDouble(stage, global, "max_error_ratio", 0.0d);
+        int maxErrorRatioMinRecords =
+                getNonNegativeInt(stage, global, "max_error_ratio_min_records", 100);
         long maxErrorRecords = getLong(stage, global, "max_error_records", 0L);
 
         int queueCapacity = getNonNegativeInt(stage, global, "queue_capacity", 10000);
@@ -77,6 +79,7 @@ public final class ErrorHandlerConfigUtil {
                 .mode(mode)
                 .sink(sinkConfig)
                 .maxErrorRatio(maxErrorRatio)
+                .maxErrorRatioMinRecords(maxErrorRatioMinRecords)
                 .maxErrorRecords(maxErrorRecords)
                 .queueCapacity(queueCapacity)
                 .queueOverflowPolicy(overflowPolicy)
@@ -92,6 +95,7 @@ public final class ErrorHandlerConfigUtil {
                 .mode(ErrorHandlerMode.DISABLE)
                 .sink(ErrorSinkConfig.empty())
                 .maxErrorRatio(0.0d)
+                .maxErrorRatioMinRecords(0)
                 .maxErrorRecords(0L)
                 .queueCapacity(0)
                 .queueOverflowPolicy(QueueOverflowPolicy.FAIL)

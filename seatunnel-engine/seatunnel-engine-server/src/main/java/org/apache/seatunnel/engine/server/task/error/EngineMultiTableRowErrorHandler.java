@@ -88,6 +88,9 @@ public class EngineMultiTableRowErrorHandler implements MultiTableRowErrorHandle
                 return support.isRowError(t, row);
             }
         } catch (Throwable ex) {
+            if (ex instanceof Error) {
+                throw (Error) ex;
+            }
             log.debug(
                     "SupportRowLevelError.isRowError threw exception, fallback to classifier", ex);
         }
