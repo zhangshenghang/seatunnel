@@ -48,16 +48,19 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
     }
 
     public void incrementTotalRecords() {
+        if (config.getMode() == ErrorHandlerMode.DISABLE) {
+            return;
+        }
         totalRecords.incrementAndGet();
     }
 
     public void onError(RowErrorContext ctx, T row, Throwable t) {
-        long currentErrorCount = errorRecords.incrementAndGet();
-        maybeThrowOnThreshold(ctx, currentErrorCount);
-
         if (config.getMode() == ErrorHandlerMode.DISABLE) {
             return;
         }
+
+        long currentErrorCount = errorRecords.incrementAndGet();
+        maybeThrowOnThreshold(ctx, currentErrorCount);
 
         // Build original data safely; failures here should not kill the job.
         String originalData = null;

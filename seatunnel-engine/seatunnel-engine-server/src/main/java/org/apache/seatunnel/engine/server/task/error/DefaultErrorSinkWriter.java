@@ -72,6 +72,7 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
     private final StageErrorConfig stageConfig;
     private final ErrorSinkConfig sinkConfig;
     private final long jobId;
+    private final int subtaskIndex;
     private final org.apache.seatunnel.engine.core.classloader.ClassLoaderService
             classLoaderService;
 
@@ -92,10 +93,12 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
             StageErrorConfig stageConfig,
             ErrorSinkConfig sinkConfig,
             long jobId,
+            int subtaskIndex,
             org.apache.seatunnel.engine.core.classloader.ClassLoaderService classLoaderService) {
         this.stageConfig = stageConfig;
         this.sinkConfig = sinkConfig;
         this.jobId = jobId;
+        this.subtaskIndex = subtaskIndex;
         this.classLoaderService = classLoaderService;
     }
 
@@ -235,7 +238,7 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
 
             this.errorSink = sink;
             SinkWriter.Context writerContext =
-                    new SimpleWriterContext(new NoopMetricsContext(), event -> {});
+                    new SimpleWriterContext(new NoopMetricsContext(), event -> {}, subtaskIndex);
             @SuppressWarnings("unchecked")
             SinkWriter<SeaTunnelRow, ?, ?> sinkWriter =
                     (SinkWriter<SeaTunnelRow, ?, ?>) sink.createWriter(writerContext);
@@ -474,15 +477,18 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
 
         private final MetricsContext metricsContext;
         private final EventListener eventListener;
+        private final int subtaskIndex;
 
-        private SimpleWriterContext(MetricsContext metricsContext, EventListener eventListener) {
+        private SimpleWriterContext(
+                MetricsContext metricsContext, EventListener eventListener, int subtaskIndex) {
             this.metricsContext = metricsContext;
             this.eventListener = eventListener;
+            this.subtaskIndex = subtaskIndex;
         }
 
         @Override
         public int getIndexOfSubtask() {
-            return 0;
+            return subtaskIndex;
         }
 
         @Override

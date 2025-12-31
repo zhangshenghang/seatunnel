@@ -289,6 +289,7 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
                         stageConfig,
                         sinkConfig,
                         seaTunnelTask.getTaskLocation().getJobId(),
+                        seaTunnelTask.getTaskLocation().getTaskIndex(),
                         seaTunnelTask.getExecutionContext().getClassLoaderService());
     }
 }
