@@ -79,16 +79,33 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
         if (config.getMode() == ErrorHandlerMode.LOG
                 || config.getMode() == ErrorHandlerMode.ROUTE) {
             try {
-                log.warn(
-                        "Row-level error in stage [{}], plugin [{}] on table [{}]: {}. TotalRecords={}, ErrorRecords={}, Original data: {}",
-                        ctx.getStage(),
-                        ctx.getPluginName(),
-                        ctx.getTableId(),
-                        t != null ? t.getMessage() : null,
-                        totalRecords.get(),
-                        currentErrorCount,
-                        originalData,
-                        t);
+                String stage = ctx != null ? ctx.getStage() : null;
+                String pluginName = ctx != null ? ctx.getPluginName() : null;
+                String tableId = ctx != null ? ctx.getTableId() : null;
+                String errorMessage = t != null ? t.getMessage() : null;
+
+                if (config.isIncludeStacktrace() && t != null) {
+                    log.warn(
+                            "Row-level error in stage [{}], plugin [{}] on table [{}]: {}. TotalRecords={}, ErrorRecords={}, Original data: {}",
+                            stage,
+                            pluginName,
+                            tableId,
+                            errorMessage,
+                            totalRecords.get(),
+                            currentErrorCount,
+                            originalData,
+                            t);
+                } else {
+                    log.warn(
+                            "Row-level error in stage [{}], plugin [{}] on table [{}]: {}. TotalRecords={}, ErrorRecords={}, Original data: {}",
+                            stage,
+                            pluginName,
+                            tableId,
+                            errorMessage,
+                            totalRecords.get(),
+                            currentErrorCount,
+                            originalData);
+                }
             } catch (Throwable logEx) {
                 log.error(
                         "Failed to log row-level error. stage={}, plugin={}, tableId={}, originalError={}, logFailure={}",
@@ -157,7 +174,13 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
     }
 
     private String truncate(String value, int maxLength) {
-        if (value == null || value.length() <= maxLength) {
+        if (value == null) {
+            return null;
+        }
+        if (maxLength <= 0) {
+            return "";
+        }
+        if (value.length() <= maxLength) {
             return value;
         }
         return value.substring(0, maxLength);

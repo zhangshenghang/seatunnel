@@ -21,12 +21,14 @@ import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
 
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
+@Slf4j
 public final class ErrorHandlerConfigUtil {
 
     public enum StageType {
@@ -56,7 +58,7 @@ public final class ErrorHandlerConfigUtil {
         double maxErrorRatio = getDouble(stage, global, "max_error_ratio", 0.0d);
         long maxErrorRecords = getLong(stage, global, "max_error_records", 0L);
 
-        int queueCapacity = (int) getLong(stage, global, "queue_capacity", 10000L);
+        int queueCapacity = getNonNegativeInt(stage, global, "queue_capacity", 10000);
         String overflowStr = getString(stage, global, "queue_overflow_policy", "FAIL");
         QueueOverflowPolicy overflowPolicy = QueueOverflowPolicy.fromString(overflowStr);
 
@@ -66,7 +68,8 @@ public final class ErrorHandlerConfigUtil {
         String dataFormatStr = getString(stage, global, "original_data_format", "JSON");
         OriginalDataFormat originalDataFormat = OriginalDataFormat.fromString(dataFormatStr);
 
-        int originalDataMaxLength = (int) getLong(stage, global, "original_data_max_length", 8192L);
+        int originalDataMaxLength =
+                getNonNegativeInt(stage, global, "original_data_max_length", 8192);
 
         ErrorSinkConfig sinkConfig = buildErrorSinkConfig(stage, global);
 
@@ -190,5 +193,15 @@ public final class ErrorHandlerConfigUtil {
             return Boolean.parseBoolean(value.toString());
         }
         return defaultValue;
+    }
+
+    private static int getNonNegativeInt(
+            Map<String, Object> stage, Map<String, Object> global, String key, int defaultValue) {
+        long value = getLong(stage, global, key, defaultValue);
+        if (value < 0 || value > Integer.MAX_VALUE) {
+            log.warn("Invalid '{}' value={}, fallback to default={}", key, value, defaultValue);
+            return defaultValue;
+        }
+        return (int) value;
     }
 }

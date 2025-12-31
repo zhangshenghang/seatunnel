@@ -66,6 +66,9 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
 
+    private static final long serialVersionUID = 1L;
+    private static final long DEFAULT_CLOSE_TIMEOUT_MILLIS = 60_000L;
+
     private final StageErrorConfig stageConfig;
     private final ErrorSinkConfig sinkConfig;
     private final long jobId;
@@ -82,6 +85,8 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
     private transient BlockingQueue<SeaTunnelRow> queue;
     private transient Thread workerThread;
     private transient ClassLoader errorSinkClassLoader;
+    private transient List<URL> errorSinkPluginJars;
+    private transient volatile boolean classLoaderReleased;
 
     public DefaultErrorSinkWriter(
             StageErrorConfig stageConfig,
@@ -138,14 +143,23 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
     @Override
     public void close() throws Exception {
         closed = true;
-        if (workerThread != null) {
-            try {
-                workerThread.join(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.warn("Interrupted while waiting for error sink worker to close");
-            }
+        waitForWorkerTermination(DEFAULT_CLOSE_TIMEOUT_MILLIS);
+
+        // If the worker thread died unexpectedly, we still try to close the writer to release
+        // connector resources.
+        closeWriterIfPossible();
+
+        // Ensure that we only release the classloader after the worker has fully stopped, otherwise
+        // background threads may still reference it.
+        waitForWorkerTermination(Math.min(5_000L, DEFAULT_CLOSE_TIMEOUT_MILLIS));
+        if (workerThread != null && workerThread.isAlive()) {
+            log.warn(
+                    "Skip releasing error sink classloader because worker thread is still alive. jobId={}, pluginName={}",
+                    jobId,
+                    sinkConfig.getPluginName());
+            return;
         }
+        releaseErrorSinkClassLoaderIfNeeded();
     }
 
     private synchronized void ensureInitialized() {
@@ -177,6 +191,7 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                 List<URL> pluginJars =
                         discovery.getPluginJarAndDependencyPaths(
                                 Collections.singletonList(pluginIdentifier));
+                this.errorSinkPluginJars = pluginJars;
                 errorSinkClassLoader = classLoaderService.getClassLoader(jobId, pluginJars);
                 log.info(
                         "Created dedicated error sink classloader via ClassLoaderService for pluginName={}, jars={}",
@@ -246,6 +261,12 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                     sinkConfig.getErrorTable(),
                     sinkConfig.getOptions(),
                     e);
+            try {
+                closeWriterIfPossible();
+            } catch (Throwable closeEx) {
+                e.addSuppressed(closeEx);
+            }
+            releaseErrorSinkClassLoaderIfNeeded();
             throw new SeaTunnelRuntimeException(
                     org.apache.seatunnel.common.exception.CommonErrorCodeDeprecated
                             .WRITER_OPERATION_FAILED,
@@ -255,6 +276,7 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
     }
 
     private void drainLoop() {
+        final SinkWriter<SeaTunnelRow, ?, ?> sinkWriter = this.writer;
         try {
             while (!closed || !queue.isEmpty()) {
                 SeaTunnelRow row = queue.poll(100, TimeUnit.MILLISECONDS);
@@ -262,12 +284,94 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                     continue;
                 }
                 log.debug("Writing error row to sink: {}", row);
-                writer.write(row);
+                sinkWriter.write(row);
             }
-            writer.close();
         } catch (Throwable e) {
             workerFailure = e;
             log.error("Error sink writer failed", e);
+        } finally {
+            try {
+                if (sinkWriter != null) {
+                    sinkWriter.close();
+                }
+            } catch (Throwable closeEx) {
+                if (workerFailure != null) {
+                    workerFailure.addSuppressed(closeEx);
+                } else {
+                    workerFailure = closeEx;
+                }
+                log.warn("Failed to close error sink writer", closeEx);
+            } finally {
+                this.writer = null;
+            }
+        }
+    }
+
+    private void waitForWorkerTermination(long timeoutMillis) {
+        if (workerThread == null) {
+            return;
+        }
+        if (!workerThread.isAlive()) {
+            return;
+        }
+        try {
+            workerThread.join(timeoutMillis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while waiting for error sink worker to close");
+        }
+
+        if (workerThread.isAlive()) {
+            log.warn(
+                    "Error sink worker thread did not terminate within {} ms, interrupting it",
+                    timeoutMillis);
+            workerThread.interrupt();
+            try {
+                workerThread.join(Math.min(5_000L, timeoutMillis));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn(
+                        "Interrupted while waiting for error sink worker to close after interrupt");
+            }
+        }
+    }
+
+    private void closeWriterIfPossible() {
+        SinkWriter<SeaTunnelRow, ?, ?> sinkWriter = this.writer;
+        if (sinkWriter == null) {
+            return;
+        }
+        try {
+            sinkWriter.close();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to close error sink writer", e);
+        } finally {
+            this.writer = null;
+        }
+    }
+
+    private void releaseErrorSinkClassLoaderIfNeeded() {
+        if (classLoaderReleased) {
+            return;
+        }
+        List<URL> jars = this.errorSinkPluginJars;
+        if (jars == null || jars.isEmpty()) {
+            classLoaderReleased = true;
+            return;
+        }
+        try {
+            classLoaderService.releaseClassLoader(jobId, jars);
+        } catch (Throwable e) {
+            log.warn(
+                    "Failed to release error sink classloader for jobId={}, pluginName={}, jars={}",
+                    jobId,
+                    sinkConfig.getPluginName(),
+                    jars,
+                    e);
+        } finally {
+            classLoaderReleased = true;
+            errorSinkPluginJars = null;
+            errorSinkClassLoader = null;
         }
     }
 

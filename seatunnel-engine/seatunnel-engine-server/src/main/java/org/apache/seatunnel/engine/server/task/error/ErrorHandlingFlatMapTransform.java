@@ -53,11 +53,6 @@ public class ErrorHandlingFlatMapTransform<T> implements SeaTunnelFlatMapTransfo
         try {
             return delegate.flatMap(row);
         } catch (Throwable t) {
-            log.info(
-                    "ErrorHandlingFlatMapTransform caught exception in plugin [{}]: {}",
-                    delegate.getPluginName(),
-                    t.getMessage(),
-                    t);
             if (errorHandler == null || !isRowError(row, t)) {
                 if (t instanceof RuntimeException) {
                     throw (RuntimeException) t;
@@ -70,11 +65,6 @@ public class ErrorHandlingFlatMapTransform<T> implements SeaTunnelFlatMapTransfo
                             "TRANSFORM",
                             delegate.getPluginName(),
                             resolveTableId(row));
-            log.info(
-                    "Routing transform row-level error to ErrorHandler, stage={}, plugin={}, tableId={}",
-                    ctx.getStage(),
-                    ctx.getPluginName(),
-                    ctx.getTableId());
             errorHandler.onError(ctx, row, t);
             return Collections.emptyList();
         }
