@@ -93,6 +93,12 @@ Current default behavior (important):
 
 For connectors (for example JDBC), the connector itself can explicitly declare what it considers a row-level error (through `SupportRowLevelError`). The engine uses that information first, then falls back to a generic classifier.
 
+> Note
+>
+> This page describes the current **generic engine-level flow**. Over time, more built-in transforms
+> are expected to implement `SupportRowLevelError` to provide more accurate row-level vs system-level
+> classification.
+
 ### Transform Row-Level Errors (Important)
 
 When a row-level error happens in a transform, the failing record is dropped from the main pipeline:
@@ -138,6 +144,8 @@ So in **batching + error handling** scenarios:
 
 - You may lose a small number of otherwise valid records.
 - Strict at-least-once semantics for every valid record are **not guaranteed**.
+
+This behavior is connector-specific, and future versions may optimize per sink implementation to reduce the chance of losing valid records.
 
 ### Recommendations for JDBC Users
 
@@ -222,6 +230,11 @@ Field precedence (per parameter):
 - `mode` (string)
   - What to do with row-level errors.
   - Values: `DISABLE` (default), `LOG`, `ROUTE`.
+- Threshold counters (current behavior)
+  - Thresholds are evaluated using internal counters:
+    - `totalRecords`: incremented once per `write(...)` call in sink, and once per transform operator invocation (`map(...)` or `flatMap(...)`) in transform chains.
+    - `errorRecords`: incremented once per row-level error handled.
+  - For transform chains, counters are shared across all wrapped operators in the chain.
 - `max_error_ratio` (double)
   - Maximum allowed ratio of error records (0.0–1.0).
   - Example: `0.01` means fail the job if more than 1% of processed records are errors.
