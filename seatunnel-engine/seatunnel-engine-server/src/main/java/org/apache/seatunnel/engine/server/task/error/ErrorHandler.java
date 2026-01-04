@@ -206,6 +206,14 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
 
     @Override
     public void close() {
+        if (config.getMode() != ErrorHandlerMode.DISABLE) {
+            log.info(
+                    "ErrorHandler summary: mode={}, totalRecords={}, errorRecords={}, errorSinkEnabled={}",
+                    config.getMode(),
+                    totalRecords.get(),
+                    errorRecords.get(),
+                    errorSinkWriter != null);
+        }
         if (errorSinkWriter != null) {
             try {
                 errorSinkWriter.close();

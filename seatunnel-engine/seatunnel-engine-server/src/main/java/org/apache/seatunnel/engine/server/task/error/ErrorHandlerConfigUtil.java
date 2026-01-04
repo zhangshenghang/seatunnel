@@ -26,10 +26,14 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 @Slf4j
 public final class ErrorHandlerConfigUtil {
+
+    private static final Set<String> ROUTE_DOWNGRADE_WARNED = ConcurrentHashMap.newKeySet();
 
     public enum StageType {
         TRANSFORM,
@@ -74,6 +78,19 @@ public final class ErrorHandlerConfigUtil {
                 getNonNegativeInt(stage, global, "original_data_max_length", 8192);
 
         ErrorSinkConfig sinkConfig = buildErrorSinkConfig(stage, global);
+
+        if (mode == ErrorHandlerMode.ROUTE && (sinkConfig == null || !sinkConfig.isConfigured())) {
+            String warnKey = stageType.name();
+            if (ROUTE_DOWNGRADE_WARNED.add(warnKey)) {
+                log.warn(
+                        "CRITICAL: env.{}.mode=ROUTE but no valid error sink is configured (missing env.{}.sink.plugin_name). "
+                                + "SeaTunnel will FORCE DOWNGRADE to LOG mode: row-level errors will be logged but NOT written to an error sink.",
+                        stageKey,
+                        stageKey);
+            }
+            mode = ErrorHandlerMode.LOG;
+            sinkConfig = ErrorSinkConfig.empty();
+        }
 
         return StageErrorConfig.builder()
                 .mode(mode)
