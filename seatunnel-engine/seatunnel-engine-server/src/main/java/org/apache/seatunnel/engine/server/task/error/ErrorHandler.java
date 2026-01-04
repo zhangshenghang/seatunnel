@@ -134,7 +134,11 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
         // propagate sink failures to fail the job; for DROP/BLOCK we only log and continue.
         if (config.getMode() == ErrorHandlerMode.ROUTE && errorSinkWriter != null) {
             try {
-                log.info("Writing error row to sink: {}", row);
+                log.debug(
+                        "Writing error row to sink. stage={}, plugin={}, tableId={}",
+                        ctx.getStage(),
+                        ctx.getPluginName(),
+                        ctx.getTableId());
                 errorSinkWriter.write(ctx, row, t);
             } catch (Exception sinkEx) {
                 if (config.getQueueOverflowPolicy() == QueueOverflowPolicy.FAIL) {

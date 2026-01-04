@@ -44,8 +44,10 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.IOException;
 import java.sql.SQLException;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Slf4j
 public class JdbcSinkWriter extends AbstractJdbcSinkWriter<ConnectionPoolManager>
@@ -185,17 +187,30 @@ public class JdbcSinkWriter extends AbstractJdbcSinkWriter<ConnectionPoolManager
         Throwable cause = t;
         while (cause != null) {
             if (cause instanceof SQLException) {
-                SQLException sqlException = (SQLException) cause;
-                String sqlState = sqlException.getSQLState();
-                if (sqlState != null) {
-                    // 22XXX: Data exception (e.g. data too long, invalid data)
-                    // 23XXX: Integrity constraint violation (e.g. duplicate key)
-                    if (sqlState.startsWith("22") || sqlState.startsWith("23")) {
-                        return true;
-                    }
+                if (isRowLevelSqlState((SQLException) cause)) {
+                    return true;
                 }
             }
             cause = cause.getCause();
+        }
+        return false;
+    }
+
+    private boolean isRowLevelSqlState(SQLException sqlException) {
+        // JDBC drivers may store the relevant SQLState in the nextException chain (especially for
+        // batch operations), so we scan both the current exception and its next exceptions.
+        Set<SQLException> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        SQLException current = sqlException;
+        while (current != null && visited.add(current)) {
+            String sqlState = current.getSQLState();
+            if (sqlState != null) {
+                // 22XXX: Data exception (e.g. data too long, invalid data)
+                // 23XXX: Integrity constraint violation (e.g. duplicate key)
+                if (sqlState.startsWith("22") || sqlState.startsWith("23")) {
+                    return true;
+                }
+            }
+            current = current.getNextException();
         }
         return false;
     }

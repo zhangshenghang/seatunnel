@@ -146,15 +146,11 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
     @Override
     public void close() throws Exception {
         closed = true;
+        if (workerThread != null) {
+            workerThread.interrupt();
+        }
         waitForWorkerTermination(DEFAULT_CLOSE_TIMEOUT_MILLIS);
 
-        // If the worker thread died unexpectedly, we still try to close the writer to release
-        // connector resources.
-        closeWriterIfPossible();
-
-        // Ensure that we only release the classloader after the worker has fully stopped, otherwise
-        // background threads may still reference it.
-        waitForWorkerTermination(Math.min(5_000L, DEFAULT_CLOSE_TIMEOUT_MILLIS));
         if (workerThread != null && workerThread.isAlive()) {
             log.warn(
                     "Skip releasing error sink classloader because worker thread is still alive. jobId={}, pluginName={}",
@@ -162,7 +158,22 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                     sinkConfig.getPluginName());
             return;
         }
-        releaseErrorSinkClassLoaderIfNeeded();
+        Throwable closeEx = null;
+        try {
+            // Worker thread has stopped; now it's safe to close remaining writer references.
+            closeWriterIfPossible();
+        } catch (Throwable e) {
+            closeEx = e;
+            log.warn("Failed to close error sink writer", e);
+        } finally {
+            releaseErrorSinkClassLoaderIfNeeded();
+        }
+        if (closeEx != null) {
+            if (closeEx instanceof Exception) {
+                throw (Exception) closeEx;
+            }
+            throw new RuntimeException(closeEx);
+        }
     }
 
     private synchronized void ensureInitialized() {
