@@ -146,9 +146,6 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
     @Override
     public void close() throws Exception {
         closed = true;
-        if (workerThread != null) {
-            workerThread.interrupt();
-        }
         waitForWorkerTermination(DEFAULT_CLOSE_TIMEOUT_MILLIS);
 
         if (workerThread != null && workerThread.isAlive()) {
@@ -301,7 +298,21 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
         final SinkWriter<SeaTunnelRow, ?, ?> sinkWriter = this.writer;
         try {
             while (!closed || !queue.isEmpty()) {
-                SeaTunnelRow row = queue.poll(100, TimeUnit.MILLISECONDS);
+                SeaTunnelRow row;
+                try {
+                    row = queue.poll(100, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException ie) {
+                    // Close path may interrupt the worker to speed up shutdown; this should not be
+                    // treated as a sink failure. If close wasn't requested, preserve the interrupt
+                    // status and treat it as a worker failure.
+                    if (!closed) {
+                        Thread.currentThread().interrupt();
+                        workerFailure = ie;
+                        log.error("Error sink worker thread interrupted unexpectedly", ie);
+                        return;
+                    }
+                    continue;
+                }
                 if (row == null) {
                     continue;
                 }
@@ -314,7 +325,11 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                 throw (Error) e;
             }
             workerFailure = e;
-            log.error("Error sink writer failed", e);
+            if (closed) {
+                log.warn("Error sink writer failed during shutdown", e);
+            } else {
+                log.error("Error sink writer failed", e);
+            }
         } finally {
             try {
                 if (sinkWriter != null) {
