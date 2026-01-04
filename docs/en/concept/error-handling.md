@@ -41,7 +41,6 @@ Other good records keep flowing.
 
 You configure this behavior via:
 
-- a **plugin-level** `error_handler` block inside a specific transform / sink,
 - stage-level options such as `env.sink_error_handler` / `env.transform_error_handler`, or
 - a global `env.error_handler`.
 
@@ -82,14 +81,26 @@ Typical patterns:
 
 ### Row-Level vs System-Level
 
-You do **not** need to implement classification yourself for most cases.
+The engine decides whether an exception should be treated as:
 
-The engine:
+- a **row-level error** (skip this record and continue), or
+- a **system-level error** (fail the job).
 
-- Treats obvious infrastructure problems (no connection, OOM, etc.) as **system-level** → job fails.
-- Tries to recognize typical **data / constraint** problems as row-level errors.
+Current default behavior (important):
 
-For some connectors (for example JDBC), the connector itself can explicitly declare what it considers a row-level error (through a `SupportRowLevelError` interface). The engine uses that information first, then falls back to a generic classifier.
+- **Sink stage**: conservative by default. If a sink connector does not implement `SupportRowLevelError`, its exceptions will be treated as system-level failures.
+- **Transform stage**: by default, non-`Error` throwables are treated as row-level errors unless the transform explicitly implements `SupportRowLevelError` (see caveats below).
+
+For connectors (for example JDBC), the connector itself can explicitly declare what it considers a row-level error (through `SupportRowLevelError`). The engine uses that information first, then falls back to a generic classifier.
+
+### Transform Row-Level Errors (Important)
+
+When a row-level error happens in a transform, the failing record is dropped from the main pipeline:
+
+- `map(...)` errors result in `null` output (record filtered).
+- `flatMap(...)` errors result in an empty output list (record dropped).
+
+This means the record will not reach downstream transforms or sinks. If `mode = ROUTE` is enabled with an error sink, the original record and error information can still be written to the error sink.
 
 ## How JDBC Error Handling Works (Important)
 
@@ -193,21 +204,18 @@ For transform stages, you can configure `transform_error_handler` in a similar w
 
 ### Where to Configure
 
-Error handling can be configured at three levels:
+Error handling can be configured at two levels:
 
-- **Plugin level** – inside a single transform / sink plugin:
-  - Each plugin can define its own `error_handler { ... }` block, for example under `transform.JsonPath` or `sink.Jdbc`.
 - **Stage level (env)** – for all transforms or all sinks in the job:
-  - `env.transform_error_handler` – applies to all transform stages that do not override it at plugin level.
-  - `env.sink_error_handler` – applies to all sink stages that do not override it at plugin level.
+  - `env.transform_error_handler` – applies to the transform stage.
+  - `env.sink_error_handler` – applies to the sink stage.
 - **Global (env)** – defaults for both stages:
-  - `env.error_handler` – global defaults when neither plugin-level nor stage-level settings provide a value.
+  - `env.error_handler` – global defaults when stage-level settings do not provide a value.
 
 Field precedence (per parameter):
 
-1. Plugin-level `*.error_handler` (highest).
-2. Stage-level `env.transform_error_handler` / `env.sink_error_handler`.
-3. Global `env.error_handler` (default `DISABLE`).
+1. Stage-level `env.transform_error_handler` / `env.sink_error_handler` (highest).
+2. Global `env.error_handler` (default `DISABLE`).
 
 ### Main Parameters
 
@@ -218,6 +226,10 @@ Field precedence (per parameter):
   - Maximum allowed ratio of error records (0.0–1.0).
   - Example: `0.01` means fail the job if more than 1% of processed records are errors.
   - Default: `0.0` (no ratio-based limit).
+- `max_error_ratio_min_records` (int)
+  - Warm-up threshold before `max_error_ratio` takes effect.
+  - When total processed records is less than this value, ratio checks are skipped to avoid failing too early on tiny samples.
+  - Default: `100`.
 - `max_error_records` (long)
   - Maximum absolute number of error records allowed.
   - Default: `0` (no count-based limit).
@@ -237,8 +249,8 @@ Field precedence (per parameter):
   - Whether to include the full Java stacktrace in the error payload.
   - Default: `false`.
 - `original_data_format` (string)
-  - How to serialize the original record in the error payload.
-  - Values: `JSON` (default), `TEXT`, `BINARY`.
+  - Reserved parameter.
+  - Current implementation stores `original_data` as the string representation of the record and ignores this field.
 - `original_data_max_length` (int)
   - Maximum length of the serialized original data.
   - Records longer than this may be truncated.
@@ -253,9 +265,9 @@ Under `..._error_handler.sink` you define where error records go:
 - `error_table` (string, JDBC-specific)
   - Target table for error records (for example `orders_sink_error_basic`).
 - Other connector-specific options
-  - For JDBC, you must still configure `url`, `user`, `password`, `driver`, etc., the same way as a normal JDBC sink.
+  - For JDBC, you must still configure `url`, `username`, `password`, `driver`, etc., the same way as a normal JDBC sink.
 
-If you do not configure a `sink` block, `ROUTE` mode will still classify row-level errors but has nowhere to write them, so only logging/metrics will be available.
+If you do not configure a `sink` block, `ROUTE` mode will still classify row-level errors but has nowhere to write them, so only logging will be available.
 
 ## Summary
 

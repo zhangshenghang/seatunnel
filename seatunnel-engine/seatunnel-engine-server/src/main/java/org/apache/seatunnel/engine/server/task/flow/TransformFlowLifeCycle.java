@@ -71,7 +71,6 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
             Collector<Record<?>> collector,
             CompletableFuture<Void> completableFuture) {
         super(action, runningTask, completableFuture);
-        log.error("DEBUG: TransformFlowLifeCycle constructor called");
         this.action = action;
         this.transform = action.getTransforms();
         this.collector = collector;
@@ -79,7 +78,6 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
 
     @Override
     public void open() throws Exception {
-        log.error("DEBUG: TransformFlowLifeCycle open() called");
         super.open();
         initErrorHandlingTransforms();
         for (SeaTunnelTransform<T> t : transform) {
@@ -225,29 +223,15 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
 
     private void initErrorHandlingTransforms() {
         if (!(runningTask instanceof SeaTunnelTask)) {
-            log.error("DEBUG: runningTask is not SeaTunnelTask");
             return;
         }
         SeaTunnelTask seaTunnelTask = (SeaTunnelTask) runningTask;
         Map<String, Object> envOptions = seaTunnelTask.getEnvOptions();
-        log.error("DEBUG: envOptions: {}", envOptions);
 
         StageErrorConfig stageConfig =
                 ErrorHandlerConfigUtil.buildStageConfig(envOptions, StageType.TRANSFORM);
-        log.error(
-                "DEBUG: stageConfig for TRANSFORM: mode={}, sinkPlugin={}, errorTable={}, "
-                        + "queueCapacity={}, queueOverflowPolicy={}, includeOriginalData={}, includeStacktrace={}, originalDataMaxLength={}",
-                stageConfig.getMode(),
-                stageConfig.getSink() != null ? stageConfig.getSink().getPluginName() : null,
-                stageConfig.getSink() != null ? stageConfig.getSink().getErrorTable() : null,
-                stageConfig.getQueueCapacity(),
-                stageConfig.getQueueOverflowPolicy(),
-                stageConfig.isIncludeOriginalData(),
-                stageConfig.isIncludeStacktrace(),
-                stageConfig.getOriginalDataMaxLength());
 
         if (stageConfig.getMode() == ErrorHandlerMode.DISABLE) {
-            log.error("DEBUG: stageConfig mode is DISABLE");
             return;
         }
         ErrorSinkRowWriter<T> errorSinkWriter = createErrorSinkWriter(seaTunnelTask, stageConfig);
@@ -258,14 +242,11 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
         for (int i = 0; i < transform.size(); i++) {
             SeaTunnelTransform<T> t = transform.get(i);
             if (t instanceof SeaTunnelFlatMapTransform) {
-                log.error(
-                        "DEBUG: Wrapping SeaTunnelFlatMapTransform with ErrorHandlingFlatMapTransform");
                 transform.set(
                         i,
                         new ErrorHandlingFlatMapTransform<>(
                                 (SeaTunnelFlatMapTransform<T>) t, handler, classifier));
             } else if (t instanceof SeaTunnelMapTransform) {
-                log.error("DEBUG: Wrapping SeaTunnelMapTransform with ErrorHandlingMapTransform");
                 transform.set(
                         i,
                         new ErrorHandlingMapTransform<>(
