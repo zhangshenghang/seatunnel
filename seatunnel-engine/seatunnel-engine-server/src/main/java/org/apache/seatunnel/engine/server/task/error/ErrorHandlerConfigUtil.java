@@ -69,7 +69,7 @@ public final class ErrorHandlerConfigUtil {
         QueueOverflowPolicy overflowPolicy = QueueOverflowPolicy.fromString(overflowStr);
 
         boolean includeStacktrace = getBoolean(stage, global, "include_stacktrace", false);
-        boolean includeOriginalData = getBoolean(stage, global, "include_original_data", true);
+        boolean includeOriginalData = getBoolean(stage, global, "include_original_data", false);
 
         String dataFormatStr = getString(stage, global, "original_data_format", "TEXT");
         if (!"TEXT".equalsIgnoreCase(dataFormatStr)) {

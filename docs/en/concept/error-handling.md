@@ -257,7 +257,7 @@ Field precedence (per parameter):
     - `BLOCK` – block the producer until space is available (may affect throughput).
 - `include_original_data` (boolean)
   - Whether to include the original record in the error payload.
-  - Default: `true` in normal mode; `false` in fully disabled internal config.
+  - Default: `false`.
 - `include_stacktrace` (boolean)
   - Whether to include the full Java stacktrace in the error payload.
   - Default: `false`.
