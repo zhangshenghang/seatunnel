@@ -89,8 +89,8 @@ env {
 
 当前版本的默认分类策略（重要）：
 
-- **Sink 阶段**：默认更保守。若 Sink Connector 未实现 `SupportRowLevelError`，其异常将被当作系统级错误处理（即使配置了 `sink_error_handler` 也会失败作业）。
-- **Transform 阶段**：默认更激进。对于非 `Error` 的异常，默认分类器会倾向判定为行级错误（除非 Transform 实现 `SupportRowLevelError` 显式声明行级/系统级）。
+- **Sink 阶段**：若 Sink Connector 未实现 `SupportRowLevelError`，其异常将被当作系统级错误处理（即使配置了 `sink_error_handler` 也会失败作业）。
+- **Transform 阶段**：若 Transform 未实现 `SupportRowLevelError`，其异常将被当作系统级错误处理（即使配置了 `transform_error_handler` 也会失败作业）。
 
 对于部分 Connector（例如 JDBC），Connector 本身会通过接口显式声明“哪些异常属于行级错误”。引擎会优先采用这类显式声明，再退回到通用分类逻辑。
 

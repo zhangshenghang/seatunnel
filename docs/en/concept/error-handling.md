@@ -88,8 +88,8 @@ The engine decides whether an exception should be treated as:
 
 Current default behavior (important):
 
-- **Sink stage**: conservative by default. If a sink connector does not implement `SupportRowLevelError`, its exceptions will be treated as system-level failures.
-- **Transform stage**: by default, non-`Error` throwables are treated as row-level errors unless the transform explicitly implements `SupportRowLevelError` (see caveats below).
+- **Sink stage**: If a sink connector does not implement `SupportRowLevelError`, its exceptions will be treated as system-level failures.
+- **Transform stage**: If a transform does not implement `SupportRowLevelError`, its exceptions will be treated as system-level failures.
 
 For connectors (for example JDBC), the connector itself can explicitly declare what it considers a row-level error (through `SupportRowLevelError`). The engine uses that information first, then falls back to a generic classifier.
 

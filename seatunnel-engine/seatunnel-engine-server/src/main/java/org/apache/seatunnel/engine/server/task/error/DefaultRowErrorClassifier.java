@@ -26,7 +26,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <ul>
  *   <li>Exception of type {@link Error} are always treated as system-level.
- *   <li>For TRANSFORM stage, non-Error throwables are treated as row-level errors.
+ *   <li>For TRANSFORM stage, non-Error throwables are treated as system-level errors by default.
+ *       Transform plugins can override by implementing {@code SupportRowLevelError}.
  *   <li>For SINK stage, non-Error throwables are treated as system-level errors by default. Sink
  *       connectors can override by implementing {@code SupportRowLevelError}.
  * </ul>
@@ -36,13 +37,6 @@ public class DefaultRowErrorClassifier<T> implements RowErrorClassifier<T> {
 
     @Override
     public boolean isRowError(Throwable t, T row, RowErrorContext ctx) {
-        if (t instanceof Error) {
-            return false;
-        }
-        if ("TRANSFORM".equalsIgnoreCase(ctx.getStage())) {
-            return true;
-        }
-        // For sink, be conservative by default.
         return false;
     }
 }
