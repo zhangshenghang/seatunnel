@@ -18,22 +18,10 @@
 package org.apache.seatunnel.engine.server.task.error;
 
 public enum OriginalDataFormat {
-    JSON,
-    TEXT,
-    BINARY;
+    TEXT;
 
     public static OriginalDataFormat fromString(String value) {
-        if (value == null) {
-            return JSON;
-        }
-        switch (value.trim().toUpperCase()) {
-            case "TEXT":
-                return TEXT;
-            case "BINARY":
-                return BINARY;
-            case "JSON":
-            default:
-                return JSON;
-        }
+        // Currently only the TEXT (String.valueOf(row)) format is supported.
+        return TEXT;
     }
 }

@@ -71,8 +71,13 @@ public final class ErrorHandlerConfigUtil {
         boolean includeStacktrace = getBoolean(stage, global, "include_stacktrace", false);
         boolean includeOriginalData = getBoolean(stage, global, "include_original_data", true);
 
-        String dataFormatStr = getString(stage, global, "original_data_format", "JSON");
-        OriginalDataFormat originalDataFormat = OriginalDataFormat.fromString(dataFormatStr);
+        String dataFormatStr = getString(stage, global, "original_data_format", "TEXT");
+        if (!"TEXT".equalsIgnoreCase(dataFormatStr)) {
+            log.warn(
+                    "Unsupported original_data_format='{}'. Current version only supports 'TEXT' (String.valueOf(row)); fallback to TEXT.",
+                    dataFormatStr);
+        }
+        OriginalDataFormat originalDataFormat = OriginalDataFormat.TEXT;
 
         int originalDataMaxLength =
                 getNonNegativeInt(stage, global, "original_data_max_length", 8192);
@@ -118,7 +123,7 @@ public final class ErrorHandlerConfigUtil {
                 .queueOverflowPolicy(QueueOverflowPolicy.FAIL)
                 .includeStacktrace(false)
                 .includeOriginalData(false)
-                .originalDataFormat(OriginalDataFormat.JSON)
+                .originalDataFormat(OriginalDataFormat.TEXT)
                 .originalDataMaxLength(0)
                 .build();
     }

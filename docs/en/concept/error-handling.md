@@ -194,7 +194,7 @@ env {
 
     include_original_data = true
     include_stacktrace = false
-    original_data_format = "JSON"
+    original_data_format = "TEXT"
     original_data_max_length = 8192
 
     sink {
@@ -263,7 +263,7 @@ Field precedence (per parameter):
   - Default: `false`.
 - `original_data_format` (string)
   - Reserved parameter.
-  - Current implementation stores `original_data` as the string representation of the record and ignores this field.
+  - Current version only supports `TEXT` and stores `original_data` as the string representation of the record (`String.valueOf(row)`).
 - `original_data_max_length` (int)
   - Maximum length of the serialized original data.
   - Records longer than this may be truncated.

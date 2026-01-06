@@ -171,7 +171,7 @@ env {
 | `queue_overflow_policy`| 字符串    | `FAIL`  | 错误队列已满时的策略：`FAIL`（失败作业）、`DROP`（丢弃新错误记录）、`BLOCK`（阻塞生产错误的线程，可能影响吞吐）。                 |
 | `include_original_data`| 布尔型    | `true`  | 是否在错误记录中包含原始数据内容；在完全禁用内部配置时会被视为 `false`。                                             |
 | `include_stacktrace`   | 布尔型    | `false` | 是否在错误记录中包含完整 Java 异常堆栈；开启会增加单条错误记录的体积。                                                |
-| `original_data_format` | 字符串    | `JSON`  | **预留参数**。当前版本内部统一按字符串形式写入错误表（`original_data` 为记录的字符串表示），暂不区分 `JSON`/`TEXT`/`BINARY` 等格式。 |
+| `original_data_format` | 字符串    | `TEXT`  | **预留参数**。当前版本仅支持 `TEXT`，内部统一按字符串形式写入错误表（`original_data` 为记录的字符串表示，即 `String.valueOf(row)`）。 |
 | `original_data_max_length` | 整型 | `8192`  | 原始数据序列化后的最大长度，超过部分将被截断，用于控制单条错误记录大小。                                                |
 
 ### 错误 Sink 相关参数一览
@@ -274,7 +274,7 @@ env {
 
     include_original_data = true
     include_stacktrace = false
-    original_data_format = "JSON"
+    original_data_format = "TEXT"
     original_data_max_length = 8192
 
     sink {
