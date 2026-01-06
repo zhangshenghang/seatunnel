@@ -63,7 +63,6 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
         Objects.requireNonNull(ctx, "RowErrorContext must not be null");
 
         long currentErrorCount = errorRecords.incrementAndGet();
-        maybeThrowOnThreshold(ctx, currentErrorCount);
 
         // Build original data safely; failures here should not kill the job.
         String originalData = null;
@@ -157,6 +156,8 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
                         sinkEx);
             }
         }
+
+        maybeThrowOnThreshold(ctx, currentErrorCount);
     }
 
     private void maybeThrowOnThreshold(RowErrorContext ctx, long currentErrorCount) {
