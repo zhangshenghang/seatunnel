@@ -44,6 +44,7 @@ import org.apache.seatunnel.plugin.discovery.seatunnel.SeaTunnelSinkPluginDiscov
 
 import lombok.extern.slf4j.Slf4j;
 
+import java.lang.reflect.Method;
 import java.net.URL;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -146,23 +147,44 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
     @Override
     public void close() throws Exception {
         closed = true;
+        Thread currentWorkerThread = workerThread;
+        if (currentWorkerThread != null) {
+            currentWorkerThread.interrupt();
+        }
         waitForWorkerTermination(DEFAULT_CLOSE_TIMEOUT_MILLIS);
 
-        if (workerThread != null && workerThread.isAlive()) {
-            log.warn(
-                    "Skip releasing error sink classloader because worker thread is still alive. jobId={}, pluginName={}",
-                    jobId,
-                    sinkConfig.getPluginName());
-            return;
-        }
         Throwable closeEx = null;
         try {
-            // Worker thread has stopped; now it's safe to close remaining writer references.
-            closeWriterIfPossible();
+            if (currentWorkerThread != null && currentWorkerThread.isAlive()) {
+                log.warn(
+                        "Error sink worker thread is still alive after close timeout. jobId={}, pluginName={}, threadName={}. "
+                                + "Will release the error sink classloader anyway to reduce classloader leak risk.",
+                        jobId,
+                        sinkConfig.getPluginName(),
+                        currentWorkerThread.getName());
+            } else {
+                // Worker thread has stopped; now it's safe to close remaining writer references.
+                closeWriterIfPossible();
+            }
         } catch (Throwable e) {
             closeEx = e;
             log.warn("Failed to close error sink writer", e);
         } finally {
+            try {
+                shutdownMySqlAbandonedConnectionCleanupThreadIfPresent();
+            } catch (Throwable cleanupEx) {
+                if (cleanupEx instanceof Error) {
+                    throw (Error) cleanupEx;
+                }
+                log.warn(
+                        "Failed to shutdown MySQL abandoned connection cleanup thread (if present). jobId={}, pluginName={}",
+                        jobId,
+                        sinkConfig.getPluginName(),
+                        cleanupEx);
+                if (closeEx != null) {
+                    closeEx.addSuppressed(cleanupEx);
+                }
+            }
             releaseErrorSinkClassLoaderIfNeeded();
         }
         if (closeEx != null) {
@@ -311,9 +333,15 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                         log.error("Error sink worker thread interrupted unexpectedly", ie);
                         return;
                     }
+                    if (queue.isEmpty()) {
+                        break;
+                    }
                     continue;
                 }
                 if (row == null) {
+                    if (closed && queue.isEmpty()) {
+                        break;
+                    }
                     continue;
                 }
                 log.debug("Writing error row to sink: {}", row);
@@ -348,6 +376,50 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
             } finally {
                 this.writer = null;
             }
+        }
+    }
+
+    private void shutdownMySqlAbandonedConnectionCleanupThreadIfPresent() {
+        ClassLoader classLoader = this.errorSinkClassLoader;
+        if (classLoader == null) {
+            return;
+        }
+
+        Class<?> cleanupClass;
+        try {
+            cleanupClass =
+                    Class.forName(
+                            "com.mysql.cj.jdbc.AbandonedConnectionCleanupThread",
+                            false,
+                            classLoader);
+        } catch (ClassNotFoundException e) {
+            return;
+        }
+
+        // Different MySQL connector/J versions expose different shutdown methods.
+        if (invokeStaticNoArgIfExists(cleanupClass, "checkedShutdown")) {
+            return;
+        }
+        if (invokeStaticNoArgIfExists(cleanupClass, "uncheckedShutdown")) {
+            return;
+        }
+        invokeStaticNoArgIfExists(cleanupClass, "shutdown");
+    }
+
+    private boolean invokeStaticNoArgIfExists(Class<?> clazz, String methodName) {
+        Method method;
+        try {
+            method = clazz.getDeclaredMethod(methodName);
+        } catch (NoSuchMethodException e) {
+            return false;
+        }
+        try {
+            method.setAccessible(true);
+            method.invoke(null);
+            return true;
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(
+                    "Failed to invoke " + clazz.getName() + "." + methodName + "()", e);
         }
     }
 
