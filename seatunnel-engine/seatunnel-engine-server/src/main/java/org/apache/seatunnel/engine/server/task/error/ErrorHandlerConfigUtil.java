@@ -42,6 +42,11 @@ public final class ErrorHandlerConfigUtil {
 
     public static StageErrorConfig buildStageConfig(
             Map<String, Object> envOptions, StageType stageType) {
+        return buildStageConfig(envOptions, stageType, -1L);
+    }
+
+    public static StageErrorConfig buildStageConfig(
+            Map<String, Object> envOptions, StageType stageType, long jobId) {
         if (envOptions == null || envOptions.isEmpty()) {
             return disabledConfig();
         }
@@ -85,7 +90,7 @@ public final class ErrorHandlerConfigUtil {
         ErrorSinkConfig sinkConfig = buildErrorSinkConfig(stage, global);
 
         if (mode == ErrorHandlerMode.ROUTE && (sinkConfig == null || !sinkConfig.isConfigured())) {
-            String warnKey = stageType.name();
+            String warnKey = jobId > 0 ? jobId + ":" + stageKey : stageKey;
             if (ROUTE_DOWNGRADE_WARNED.add(warnKey)) {
                 log.warn(
                         "CRITICAL: env.{}.mode=ROUTE but no valid error sink is configured (missing env.{}.sink.plugin_name). "

@@ -369,7 +369,9 @@ public class SinkFlowLifeCycle<T, CommitInfoT extends Serializable, AggregatedCo
         SeaTunnelTask seaTunnelTask = (SeaTunnelTask) runningTask;
         StageErrorConfig stageConfig =
                 ErrorHandlerConfigUtil.buildStageConfig(
-                        seaTunnelTask.getEnvOptions(), StageType.SINK);
+                        seaTunnelTask.getEnvOptions(),
+                        StageType.SINK,
+                        seaTunnelTask.getTaskLocation().getJobId());
         if (stageConfig.getMode() == ErrorHandlerMode.DISABLE) {
             return;
         }

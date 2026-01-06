@@ -229,7 +229,10 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
         Map<String, Object> envOptions = seaTunnelTask.getEnvOptions();
 
         StageErrorConfig stageConfig =
-                ErrorHandlerConfigUtil.buildStageConfig(envOptions, StageType.TRANSFORM);
+                ErrorHandlerConfigUtil.buildStageConfig(
+                        envOptions,
+                        StageType.TRANSFORM,
+                        seaTunnelTask.getTaskLocation().getJobId());
 
         if (stageConfig.getMode() == ErrorHandlerMode.DISABLE) {
             return;
