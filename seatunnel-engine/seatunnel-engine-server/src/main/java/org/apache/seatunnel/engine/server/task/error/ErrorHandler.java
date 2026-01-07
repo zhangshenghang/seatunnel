@@ -140,19 +140,17 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
                         ctx.getTableId());
                 errorSinkWriter.write(ctx, row, t);
             } catch (Exception sinkEx) {
-                if (config.getQueueOverflowPolicy() == QueueOverflowPolicy.FAIL) {
-                    throw new RuntimeException(
-                            String.format(
-                                    "Error sink failed for stage [%s], plugin [%s]",
-                                    ctx.getStage(), ctx.getPluginName()),
-                            sinkEx);
-                }
                 log.error(
                         "Error sink failed for stage [{}], plugin [{}] with queue_overflow_policy={}, "
                                 + "job will continue running",
                         ctx.getStage(),
                         ctx.getPluginName(),
                         config.getQueueOverflowPolicy(),
+                        sinkEx);
+                throw new RuntimeException(
+                        String.format(
+                                "Error sink failed for stage [%s], plugin [%s]",
+                                ctx.getStage(), ctx.getPluginName()),
                         sinkEx);
             }
         }
