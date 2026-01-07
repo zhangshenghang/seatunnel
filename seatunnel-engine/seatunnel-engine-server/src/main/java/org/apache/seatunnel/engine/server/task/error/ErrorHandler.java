@@ -129,8 +129,7 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
             }
         }
 
-        // In ROUTE mode, delegate to the error sink. For queue_overflow_policy = FAIL we
-        // propagate sink failures to fail the job; for DROP/BLOCK we only log and continue.
+        // In ROUTE mode, delegate to the error sink. Sink write failures will fail the job.
         if (config.getMode() == ErrorHandlerMode.ROUTE && errorSinkWriter != null) {
             try {
                 log.debug(
@@ -141,11 +140,9 @@ public class ErrorHandler<T> implements Serializable, AutoCloseable {
                 errorSinkWriter.write(ctx, row, t);
             } catch (Exception sinkEx) {
                 log.error(
-                        "Error sink failed for stage [{}], plugin [{}] with queue_overflow_policy={}, "
-                                + "job will continue running",
+                        "Error sink failed for stage [{}], plugin [{}], failing the job",
                         ctx.getStage(),
                         ctx.getPluginName(),
-                        config.getQueueOverflowPolicy(),
                         sinkEx);
                 throw new RuntimeException(
                         String.format(
