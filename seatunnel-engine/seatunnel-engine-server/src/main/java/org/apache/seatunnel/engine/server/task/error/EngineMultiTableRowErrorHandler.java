@@ -69,7 +69,7 @@ public class EngineMultiTableRowErrorHandler implements MultiTableRowErrorHandle
 
         // Delegate to shared ErrorHandler; it may throw when thresholds or queue policies demand
         // a job failure.
-        log.info(
+        log.debug(
                 "Routing multi-table row-level error to error handler for plugin [{}], table [{}]: {}",
                 pluginName,
                 effectiveTableId,

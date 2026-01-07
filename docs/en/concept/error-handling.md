@@ -93,6 +93,8 @@ Current default behavior (important):
 
 For connectors (for example JDBC), the connector itself can explicitly declare what it considers a row-level error (through `SupportRowLevelError`). The engine uses that information first, then falls back to a generic classifier.
 
+Only Connectors/Transforms that implement SupportRowLevelError can trigger row-level errors; otherwise, all exceptions are treated as system-level errors and will cause the job to fail.
+
 > Note
 >
 > This page describes the current **generic engine-level flow**. Over time, more built-in transforms

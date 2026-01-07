@@ -94,6 +94,8 @@ env {
 
 对于部分 Connector（例如 JDBC），Connector 本身会通过接口显式声明“哪些异常属于行级错误”。引擎会优先采用这类显式声明，再退回到通用分类逻辑。
 
+只有实现了 `SupportRowLevelError` 的 Connector/Transform，才能触发行级错误；否则所有异常都会被当作系统级错误处理并导致作业失败。
+
 > 说明
 >
 > 本文描述的是当前版本的**通用引擎级流程**。后续会逐步推动更多内置 Transform 实现 `SupportRowLevelError`，以便更准确地区分“行级错误”与“系统级错误”。
