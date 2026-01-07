@@ -52,6 +52,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -201,11 +203,11 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
         }
         try {
             log.info(
-                    "Initializing DefaultErrorSinkWriter with mode={}, pluginName={}, errorTable={}, options={}",
+                    "Initializing DefaultErrorSinkWriter with mode={}, pluginName={}, errorTable={}, optionKeys={}",
                     stageConfig.getMode(),
                     sinkConfig.getPluginName(),
                     sinkConfig.getErrorTable(),
-                    sinkConfig.getOptions());
+                    optionKeys(sinkConfig.getOptions()));
             this.errorRowType = buildErrorRowType();
 
             // Resolve connector jars for the error sink plugin once and let the shared
@@ -294,10 +296,10 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
                 throw (Error) e;
             }
             log.error(
-                    "Failed to initialize error sink writer for pluginName={}, errorTable={}, options={}",
+                    "Failed to initialize error sink writer for pluginName={}, errorTable={}, optionKeys={}",
                     sinkConfig.getPluginName(),
                     sinkConfig.getErrorTable(),
-                    sinkConfig.getOptions(),
+                    optionKeys(sinkConfig.getOptions()),
                     e);
             try {
                 closeWriterIfPossible();
@@ -580,6 +582,13 @@ public class DefaultErrorSinkWriter<T> implements ErrorSinkRowWriter<T> {
             return value;
         }
         return value.substring(0, maxLength);
+    }
+
+    private static Set<String> optionKeys(Map<String, Object> options) {
+        if (options == null || options.isEmpty()) {
+            return Collections.emptySet();
+        }
+        return new TreeSet<>(options.keySet());
     }
 
     private static final class SimpleWriterContext implements SinkWriter.Context {
