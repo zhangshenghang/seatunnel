@@ -306,6 +306,82 @@ public class SinkErrorToMysqlIT extends TestSuiteBase implements TestResource {
     }
 
     @TestTemplate
+    public void testSinkBatchDataErrorRoutedToMysqlAtClose(TestContainer container)
+            throws Exception {
+        Container.ExecResult result =
+                container.executeJob(
+                        "/error-handling/sink_fakesource_to_mysql_with_error_handler_batch_close.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0, stderr: " + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM orders_from_sink");
+                Assertions.assertTrue(rs.next(), "Should have count result for normal rows");
+                int normalCount = rs.getInt(1);
+                Assertions.assertEquals(
+                        0,
+                        normalCount,
+                        "Batch data error should drop the whole batch, no rows in main sink table");
+
+                ResultSet ers =
+                        statement.executeQuery("SELECT COUNT(*) FROM orders_sink_error_basic");
+                Assertions.assertTrue(ers.next(), "Should have count result for error rows");
+                int errorCount = ers.getInt(1);
+                Assertions.assertEquals(
+                        4,
+                        errorCount,
+                        "RowErrorCollector should report all rows in the failing batch");
+            }
+        }
+    }
+
+    @TestTemplate
+    public void testSinkBatchConstraintErrorRoutedToMysqlAtClose(TestContainer container)
+            throws Exception {
+        Container.ExecResult result =
+                container.executeJob(
+                        "/error-handling/sink_fakesource_to_mysql_with_error_handler_batch_close_constraint.conf");
+
+        Assertions.assertEquals(
+                0,
+                result.getExitCode(),
+                "SeaTunnel job should exit with code 0, stderr: " + result.getStderr());
+
+        try (Connection connection =
+                DriverManager.getConnection(
+                        mysqlContainer.getJdbcUrl(),
+                        mysqlContainer.getUsername(),
+                        mysqlContainer.getPassword())) {
+            try (Statement statement = connection.createStatement()) {
+                ResultSet rs = statement.executeQuery("SELECT COUNT(*) FROM orders_from_sink");
+                Assertions.assertTrue(rs.next(), "Should have count result for normal rows");
+                int normalCount = rs.getInt(1);
+                Assertions.assertEquals(
+                        0,
+                        normalCount,
+                        "Batch constraint error should drop the whole batch, no rows in main sink table");
+
+                ResultSet ers =
+                        statement.executeQuery("SELECT COUNT(*) FROM orders_sink_error_basic");
+                Assertions.assertTrue(ers.next(), "Should have count result for error rows");
+                int errorCount = ers.getInt(1);
+                Assertions.assertEquals(
+                        4,
+                        errorCount,
+                        "RowErrorCollector should report all rows in the failing batch");
+            }
+        }
+    }
+
+    @TestTemplate
     public void testSinkErrorLogMode(TestContainer container) throws Exception {
         Container.ExecResult result =
                 container.executeJob("/error-handling/sink_error_handler_log_mode.conf");
