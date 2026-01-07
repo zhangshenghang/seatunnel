@@ -41,6 +41,7 @@ import org.apache.seatunnel.engine.server.task.error.ErrorSinkConfig;
 import org.apache.seatunnel.engine.server.task.error.ErrorSinkRowWriter;
 import org.apache.seatunnel.engine.server.task.error.RowErrorClassifier;
 import org.apache.seatunnel.engine.server.task.error.StageErrorConfig;
+import org.apache.seatunnel.engine.server.task.error.SynchronizedErrorSinkRowWriter;
 import org.apache.seatunnel.engine.server.task.record.Barrier;
 
 import org.apache.commons.collections4.CollectionUtils;
@@ -269,11 +270,12 @@ public class TransformFlowLifeCycle<T> extends ActionFlowLifeCycle
             return null;
         }
         return (ErrorSinkRowWriter<T>)
-                new DefaultErrorSinkWriter<>(
-                        stageConfig,
-                        sinkConfig,
-                        seaTunnelTask.getTaskLocation().getJobId(),
-                        seaTunnelTask.getTaskLocation().getTaskIndex(),
-                        seaTunnelTask.getExecutionContext().getClassLoaderService());
+                new SynchronizedErrorSinkRowWriter<>(
+                        new DefaultErrorSinkWriter<>(
+                                stageConfig,
+                                sinkConfig,
+                                seaTunnelTask.getTaskLocation().getJobId(),
+                                seaTunnelTask.getTaskLocation().getTaskIndex(),
+                                seaTunnelTask.getExecutionContext().getClassLoaderService()));
     }
 }

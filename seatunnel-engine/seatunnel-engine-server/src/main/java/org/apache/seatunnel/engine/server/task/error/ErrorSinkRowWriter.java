@@ -22,17 +22,6 @@ import java.io.Serializable;
 /** Sink writer used by {@link ErrorHandler} to persist error records. */
 public interface ErrorSinkRowWriter<T> extends Serializable, AutoCloseable {
 
-    /**
-     * Write a single error record to the error sink.
-     *
-     * <p>Implementations must be thread-safe in the sense of being called from the task thread.
-     *
-     * @param ctx error context
-     * @param row original row
-     * @param t the throwable that caused the error
-     * @throws Exception when writing failed; the caller will treat this as a system-level error and
-     *     fail the job
-     */
     void write(RowErrorContext ctx, T row, Throwable t) throws Exception;
 
     @Override
