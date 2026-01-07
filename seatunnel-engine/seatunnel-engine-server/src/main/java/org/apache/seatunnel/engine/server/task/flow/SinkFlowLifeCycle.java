@@ -46,6 +46,7 @@ import org.apache.seatunnel.engine.server.task.context.SinkWriterContext;
 import org.apache.seatunnel.engine.server.task.error.DefaultErrorSinkWriter;
 import org.apache.seatunnel.engine.server.task.error.DefaultRowErrorClassifier;
 import org.apache.seatunnel.engine.server.task.error.EngineMultiTableRowErrorHandler;
+import org.apache.seatunnel.engine.server.task.error.EngineRowErrorCollector;
 import org.apache.seatunnel.engine.server.task.error.ErrorHandler;
 import org.apache.seatunnel.engine.server.task.error.ErrorHandlerConfigUtil;
 import org.apache.seatunnel.engine.server.task.error.ErrorHandlerConfigUtil.StageType;
@@ -112,6 +113,11 @@ public class SinkFlowLifeCycle<T, CommitInfoT extends Serializable, AggregatedCo
     private final boolean containAggCommitter;
 
     private final EventListener eventListener;
+
+    private transient StageErrorConfig stageErrorConfig;
+    private transient ErrorHandler<T> stageErrorHandler;
+    private transient RowErrorClassifier<T> stageRowErrorClassifier;
+    private transient org.apache.seatunnel.api.sink.error.RowErrorCollector stageRowErrorCollector;
 
     /** Mapping relationship between upstream TablePath and downstream TablePath. */
     private final Map<TablePath, TablePath> tablesMaps = new HashMap<>();
@@ -352,9 +358,14 @@ public class SinkFlowLifeCycle<T, CommitInfoT extends Serializable, AggregatedCo
                                                                     .deserialize(bytes)))
                             .collect(Collectors.toList());
         }
+        initRowErrorCollectorIfNeed();
         this.writerContext =
                 new SinkWriterContext(
-                        sinkAction.getParallelism(), indexID, metricsContext, eventListener);
+                        sinkAction.getParallelism(),
+                        indexID,
+                        metricsContext,
+                        eventListener,
+                        stageRowErrorCollector);
         if (states.isEmpty()) {
             this.writer = sinkAction.getSink().createWriter(writerContext);
         } else {
@@ -363,7 +374,8 @@ public class SinkFlowLifeCycle<T, CommitInfoT extends Serializable, AggregatedCo
         wrapWriterIfNeed();
     }
 
-    private void wrapWriterIfNeed() {
+    @SuppressWarnings("unchecked")
+    private void initRowErrorCollectorIfNeed() {
         if (!(runningTask instanceof SeaTunnelTask)) {
             return;
         }
@@ -373,6 +385,7 @@ public class SinkFlowLifeCycle<T, CommitInfoT extends Serializable, AggregatedCo
                         seaTunnelTask.getEnvOptions(),
                         StageType.SINK,
                         seaTunnelTask.getTaskLocation().getJobId());
+        this.stageErrorConfig = stageConfig;
         if (stageConfig.getMode() == ErrorHandlerMode.DISABLE) {
             return;
         }
@@ -380,6 +393,45 @@ public class SinkFlowLifeCycle<T, CommitInfoT extends Serializable, AggregatedCo
         ErrorSinkRowWriter<T> errorSinkWriter = createErrorSinkWriter(seaTunnelTask, stageConfig);
         ErrorHandler<T> handler = new ErrorHandler<>(stageConfig, errorSinkWriter);
         RowErrorClassifier<T> classifier = new DefaultRowErrorClassifier<>();
+
+        this.stageErrorHandler = handler;
+        this.stageRowErrorClassifier = classifier;
+
+        // Expose engine-side collector to connectors so that they can report row-level errors
+        // during flush/prepareCommit/close.
+        String pluginName = sinkAction.getSink().getPluginName();
+        ErrorHandler<SeaTunnelRow> rowHandler = (ErrorHandler<SeaTunnelRow>) handler;
+        this.stageRowErrorCollector = new EngineRowErrorCollector(rowHandler, pluginName);
+    }
+
+    private void wrapWriterIfNeed() {
+        if (!(runningTask instanceof SeaTunnelTask)) {
+            return;
+        }
+        SeaTunnelTask seaTunnelTask = (SeaTunnelTask) runningTask;
+        StageErrorConfig stageConfig = stageErrorConfig;
+        if (stageConfig == null) {
+            stageConfig =
+                    ErrorHandlerConfigUtil.buildStageConfig(
+                            seaTunnelTask.getEnvOptions(),
+                            StageType.SINK,
+                            seaTunnelTask.getTaskLocation().getJobId());
+            stageErrorConfig = stageConfig;
+        }
+        if (stageConfig.getMode() == ErrorHandlerMode.DISABLE) {
+            return;
+        }
+
+        ErrorHandler<T> handler = stageErrorHandler;
+        RowErrorClassifier<T> classifier = stageRowErrorClassifier;
+        if (handler == null || classifier == null) {
+            ErrorSinkRowWriter<T> errorSinkWriter =
+                    createErrorSinkWriter(seaTunnelTask, stageConfig);
+            handler = new ErrorHandler<>(stageConfig, errorSinkWriter);
+            classifier = new DefaultRowErrorClassifier<>();
+            stageErrorHandler = handler;
+            stageRowErrorClassifier = classifier;
+        }
         String pluginName = sinkAction.getSink().getPluginName();
 
         if (this.writer instanceof MultiTableSinkWriter) {

@@ -19,6 +19,7 @@ package org.apache.seatunnel.api.sink;
 
 import org.apache.seatunnel.api.common.metrics.MetricsContext;
 import org.apache.seatunnel.api.event.EventListener;
+import org.apache.seatunnel.api.sink.error.RowErrorCollector;
 import org.apache.seatunnel.api.table.schema.event.SchemaChangeEvent;
 
 import java.io.IOException;
@@ -117,5 +118,17 @@ public interface SinkWriter<T, CommitInfoT, StateT> {
          * @return
          */
         EventListener getEventListener();
+
+        /**
+         * Optional row-level error collector provided by the engine.
+         *
+         * <p>Sink connectors can report row-level errors that happen outside {@link
+         * SinkWriter#write(Object)} (for example during internal flush / {@link
+         * #prepareCommit(long)} / {@link #close()}), so that the engine-side error handler can
+         * capture the involved rows.
+         */
+        default Optional<RowErrorCollector> getRowErrorCollector() {
+            return Optional.empty();
+        }
     }
 }
