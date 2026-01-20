@@ -253,6 +253,7 @@ public class FixedChunkSplitter extends ChunkSplitter {
             throws SQLException {
         PreparedStatement statement = createPreparedStatement(split.getSplitQuery());
         statement.setInt(1, (Integer) split.getSplitStart());
+        log.info("String column split - param[1]: {}", split.getSplitStart());
         return statement;
     }
 
@@ -267,6 +268,12 @@ public class FixedChunkSplitter extends ChunkSplitter {
                         .ofBatchNum(table.getPartitionNumber());
         Serializable[][] parameterValues =
                 jdbcNumericBetweenParametersProvider.getParameterValues();
+        log.info(
+                "Number column split - params: [{}={}, {}={}]",
+                1,
+                parameterValues[0],
+                2,
+                parameterValues[1]);
         List<JdbcSourceSplit> splits = new ArrayList<>(table.getPartitionNumber());
         for (int i = 0; i < parameterValues.length; i++) {
             JdbcSourceSplit split =
