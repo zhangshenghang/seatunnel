@@ -20,6 +20,7 @@ package org.apache.seatunnel.connectors.seatunnel.jdbc.config;
 import org.apache.seatunnel.api.configuration.Option;
 import org.apache.seatunnel.api.configuration.Options;
 import org.apache.seatunnel.connectors.seatunnel.jdbc.source.StringSplitMode;
+import org.apache.seatunnel.connectors.seatunnel.jdbc.source.StringSplitStrategy;
 
 import java.util.List;
 
@@ -159,4 +160,18 @@ public class JdbcSourceOptions extends JdbcCommonOptions {
                     .noDefaultValue()
                     .withDescription(
                             "Specifies the collation to use when string_split_mode is set to `charset_based` and the table has a special collation. If not specified, the database's default collation will be used.");
+
+    public static final Option<StringSplitStrategy> STRING_SPLIT_STRATEGY =
+            Options.key("split.string-strategy")
+                    .enumType(StringSplitStrategy.class)
+                    .noDefaultValue()
+                    .withDescription(
+                            "Controls how String partition columns are split. `range` uses range-based splitting, `hash` uses hash-based splitting, `none` disables String splitting, and `auto` prefers range splitting then falls back to hash when needed.");
+
+    public static final Option<Boolean> ENABLE_HASH_SPLIT_FOR_STRING_COLUMN =
+            Options.key("split.enable-hash-split-for-string-column")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Deprecated compatibility option. `true` maps to `split.string-strategy = hash`, `false` maps to `split.string-strategy = none` when `split.string-strategy` is not explicitly configured.");
 }

@@ -26,6 +26,7 @@ import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.api.table.catalog.TableSchema;
 import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
+import org.apache.seatunnel.api.table.type.SqlType;
 import org.apache.seatunnel.common.exception.CommonError;
 import org.apache.seatunnel.connectors.seatunnel.jdbc.config.JdbcSourceConfig;
 import org.apache.seatunnel.connectors.seatunnel.jdbc.utils.ObjectUtils;
@@ -79,12 +80,45 @@ public class DynamicChunkSplitter extends ChunkSplitter {
             JdbcSourceTable table, SeaTunnelRowType splitKey) throws Exception {
         String splitKeyName = splitKey.getFieldNames()[0];
         SeaTunnelDataType splitKeyType = splitKey.getFieldType(0);
+        if (SqlType.STRING.equals(splitKeyType.getSqlType())) {
+            if (StringSplitStrategy.HASH.equals(config.getStringSplitStrategy())) {
+                return createStringHashSplits(
+                        table, splitKeyName, splitKeyType, calculateStringHashShardCount(table));
+            }
+            if (StringSplitStrategy.NONE.equals(config.getStringSplitStrategy())) {
+                return Collections.singletonList(createSingleSplit(table));
+            }
+            if (StringSplitStrategy.AUTO.equals(config.getStringSplitStrategy())) {
+                try {
+                    List<ChunkRange> chunks =
+                            splitTableIntoChunks(table, splitKeyName, splitKeyType);
+                    return toJdbcSourceSplits(table, splitKeyName, splitKeyType, chunks);
+                } catch (Exception e) {
+                    log.warn(
+                            "Range string split failed for table {}, fallback to hash split",
+                            table.getTablePath(),
+                            e);
+                    return createStringHashSplits(
+                            table,
+                            splitKeyName,
+                            splitKeyType,
+                            calculateStringHashShardCount(table));
+                }
+            }
+        }
         List<ChunkRange> chunks = splitTableIntoChunks(table, splitKeyName, splitKeyType);
+        return toJdbcSourceSplits(table, splitKeyName, splitKeyType, chunks);
+    }
 
+    private Collection<JdbcSourceSplit> toJdbcSourceSplits(
+            JdbcSourceTable table,
+            String splitKeyName,
+            SeaTunnelDataType splitKeyType,
+            List<ChunkRange> chunks) {
         List<JdbcSourceSplit> splits = new ArrayList<>();
         for (int i = 0; i < chunks.size(); i++) {
             ChunkRange chunk = chunks.get(i);
-            JdbcSourceSplit split =
+            splits.add(
                     new JdbcSourceSplit(
                             table.getTablePath(),
                             createSplitId(table.getTablePath(), i),
@@ -92,14 +126,16 @@ public class DynamicChunkSplitter extends ChunkSplitter {
                             splitKeyName,
                             splitKeyType,
                             chunk.getChunkStart(),
-                            chunk.getChunkEnd());
-            splits.add(split);
+                            chunk.getChunkEnd()));
         }
         return splits;
     }
 
     private PreparedStatement createDynamicSplitStatement(JdbcSourceSplit split, TableSchema schema)
             throws SQLException {
+        if (isHashStringSplit(split)) {
+            return createStringHashSplitStatement(split);
+        }
         String splitQuery = createDynamicSplitQuerySQL(split, schema);
         PreparedStatement statement = createPreparedStatement(splitQuery);
         prepareDynamicSplitStatement(statement, split);
@@ -129,18 +165,111 @@ public class DynamicChunkSplitter extends ChunkSplitter {
             case FLOAT:
                 return evenlyColumnSplitChunks(table, splitColumnName, min, max, chunkSize);
             case STRING:
-                if (useCharsetBasedStringSplitter) {
-                    return charsetBasedColumnSplitChunks(
-                            table, splitColumnName, min, max, chunkSize);
-                } else {
-                    return evenlyColumnSplitChunks(table, splitColumnName, min, max, chunkSize);
-                }
+                return splitStringColumnChunks(table, splitColumnName, min, max, chunkSize);
             case DATE:
                 return dateColumnSplitChunks(table, splitColumnName, min, max, chunkSize);
             default:
                 throw CommonError.unsupportedDataType(
                         "JDBC", splitColumnType.getSqlType().toString(), splitColumnName);
         }
+    }
+
+    private List<ChunkRange> splitStringColumnChunks(
+            JdbcSourceTable table, String splitColumnName, Object min, Object max, int chunkSize)
+            throws Exception {
+        switch (config.getStringSplitStrategy()) {
+            case NONE:
+                log.info(
+                        "String split strategy is NONE for table {}, fallback to single split",
+                        table.getTablePath());
+                return Collections.singletonList(ChunkRange.all());
+            case RANGE:
+                return splitStringColumnByRange(table, splitColumnName, min, max, chunkSize);
+            case AUTO:
+                return splitStringColumnByRange(table, splitColumnName, min, max, chunkSize);
+            case HASH:
+                throw CommonError.illegalArgument(
+                        config.getStringSplitStrategy().toString(),
+                        "hash strategy should be handled before range chunk generation");
+            default:
+                throw CommonError.illegalArgument(
+                        config.getStringSplitStrategy().toString(),
+                        "unsupported string split strategy");
+        }
+    }
+
+    private List<ChunkRange> splitStringColumnByRange(
+            JdbcSourceTable table, String splitColumnName, Object min, Object max, int chunkSize)
+            throws Exception {
+        if (useCharsetBasedStringSplitter) {
+            return charsetBasedColumnSplitChunks(table, splitColumnName, min, max, chunkSize);
+        }
+        return evenlyColumnSplitChunks(table, splitColumnName, min, max, chunkSize);
+    }
+
+    @VisibleForTesting
+    List<JdbcSourceSplit> createStringHashSplits(
+            JdbcSourceTable table,
+            String splitKeyName,
+            SeaTunnelDataType splitKeyType,
+            int shardCount) {
+        List<JdbcSourceSplit> splits = new ArrayList<>(shardCount);
+        Column column =
+                table.getCatalogTable().getTableSchema().getColumns().stream()
+                        .filter(c -> c.getName().equals(splitKeyName))
+                        .findAny()
+                        .orElseThrow(
+                                () ->
+                                        CommonError.illegalArgument(
+                                                splitKeyName, "split key column not found"));
+
+        for (int i = 0; i < shardCount; i++) {
+            String splitQuery;
+            if (StringUtils.isNotBlank(table.getQuery())) {
+                splitQuery =
+                        String.format(
+                                "SELECT * FROM (%s) st_jdbc_splitter WHERE %s = ?",
+                                table.getQuery(),
+                                jdbcDialect.hashModForField(
+                                        column.getSourceType(), splitKeyName, shardCount));
+            } else {
+                splitQuery =
+                        String.format(
+                                "SELECT * FROM %s WHERE %s = ?",
+                                jdbcDialect.tableIdentifier(table.getTablePath()),
+                                jdbcDialect.hashModForField(
+                                        column.getSourceType(), splitKeyName, shardCount));
+            }
+            splits.add(
+                    new JdbcSourceSplit(
+                            table.getTablePath(),
+                            createSplitId(table.getTablePath(), i),
+                            splitQuery,
+                            splitKeyName,
+                            splitKeyType,
+                            i,
+                            null));
+        }
+        return splits;
+    }
+
+    private int calculateStringHashShardCount(JdbcSourceTable table) throws SQLException {
+        long approximateRowCnt = queryApproximateRowCnt(table);
+        return Math.max((int) (approximateRowCnt / config.getSplitSize()) + 1, 1);
+    }
+
+    private boolean isHashStringSplit(JdbcSourceSplit split) {
+        return SqlType.STRING.equals(split.getSplitKeyType().getSqlType())
+                && split.getSplitQuery() != null
+                && split.getSplitStart() instanceof Integer
+                && split.getSplitEnd() == null;
+    }
+
+    private PreparedStatement createStringHashSplitStatement(JdbcSourceSplit split)
+            throws SQLException {
+        PreparedStatement statement = createPreparedStatement(split.getSplitQuery());
+        statement.setInt(1, (Integer) split.getSplitStart());
+        return statement;
     }
 
     private List<ChunkRange> charsetBasedColumnSplitChunks(

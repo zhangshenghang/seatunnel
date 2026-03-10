@@ -549,6 +549,47 @@ public class JdbcMysqlSplitIT extends TestSuiteBase implements TestResource {
         return splitter;
     }
 
+    private JdbcSourceSplit[] getSplitArrayWithStrategy(
+            Map<String, Object> configMap, CatalogTable table, String splitKey, String strategy)
+            throws Exception {
+        configMap.put("partition_column", splitKey);
+        configMap.put("split.string-strategy", strategy);
+        DynamicChunkSplitter splitter = getDynamicChunkSplitter(configMap);
+
+        JdbcSourceTable jdbcSourceTable =
+                JdbcSourceTable.builder()
+                        .tablePath(TablePath.of(MYSQL_DATABASE, MYSQL_TABLE))
+                        .catalogTable(table)
+                        .partitionColumn(splitKey)
+                        .build();
+        Collection<JdbcSourceSplit> jdbcSourceSplits = splitter.generateSplits(jdbcSourceTable);
+        JdbcSourceSplit[] splitArray = jdbcSourceSplits.toArray(new JdbcSourceSplit[0]);
+        Assertions.assertTrue(splitArray.length >= 1);
+        Assertions.assertEquals(splitKey, splitArray[0].getSplitKeyName());
+        return splitArray;
+    }
+
+    private JdbcSourceSplit[] getFixedSplitArrayWithStrategy(
+            Map<String, Object> configMap, CatalogTable table, String splitKey, String strategy)
+            throws Exception {
+        configMap.put("partition_column", splitKey);
+        configMap.put("split.string-strategy", strategy);
+        FixedChunkSplitter splitter = getFixedChunkSplitter(configMap);
+
+        JdbcSourceTable jdbcSourceTable =
+                JdbcSourceTable.builder()
+                        .tablePath(TablePath.of(MYSQL_DATABASE, MYSQL_TABLE))
+                        .catalogTable(table)
+                        .partitionColumn(splitKey)
+                        .partitionNumber(4)
+                        .build();
+        Collection<JdbcSourceSplit> jdbcSourceSplits = splitter.generateSplits(jdbcSourceTable);
+        JdbcSourceSplit[] splitArray = jdbcSourceSplits.toArray(new JdbcSourceSplit[0]);
+        Assertions.assertTrue(splitArray.length >= 1);
+        Assertions.assertEquals(splitKey, splitArray[0].getSplitKeyName());
+        return splitArray;
+    }
+
     @Override
     @AfterAll
     public void tearDown() throws Exception {
@@ -623,6 +664,56 @@ public class JdbcMysqlSplitIT extends TestSuiteBase implements TestResource {
     }
 
     @Test
+    public void testDynamicStringSplitStrategy() throws Exception {
+        Map<String, Object> configMap = new HashMap<>();
+        configMap.put("url", mysqlUrlInfo.getUrlWithDatabase().get());
+        configMap.put("driver", "com.mysql.cj.jdbc.Driver");
+        configMap.put("user", MYSQL_USERNAME);
+        configMap.put("password", MYSQL_PASSWORD);
+        configMap.put("table_path", MYSQL_DATABASE + "." + MYSQL_TABLE);
+        configMap.put("split.size", "10");
+
+        TablePath tablePathMySql = TablePath.of(MYSQL_DATABASE, MYSQL_TABLE);
+        MySqlCatalog mySqlCatalog =
+                new MySqlCatalog("mysql", MYSQL_USERNAME, MYSQL_PASSWORD, mysqlUrlInfo, null);
+        mySqlCatalog.open();
+        Assertions.assertTrue(mySqlCatalog.tableExists(tablePathMySql));
+        CatalogTable table = mySqlCatalog.getTable(tablePathMySql);
+
+        JdbcSourceSplit[] noneSplitArray =
+                getSplitArrayWithStrategy(configMap, table, "c_varchar", "none");
+        Assertions.assertEquals(1, noneSplitArray.length);
+        Assertions.assertNull(noneSplitArray[0].getSplitQuery());
+        Assertions.assertNull(noneSplitArray[0].getSplitStart());
+        Assertions.assertNull(noneSplitArray[0].getSplitEnd());
+
+        JdbcSourceSplit[] hashSplitArray =
+                getSplitArrayWithStrategy(configMap, table, "c_varchar", "hash");
+        Assertions.assertTrue(hashSplitArray.length > 1);
+        Assertions.assertTrue(hashSplitArray[0].getSplitStart() instanceof Integer);
+        Assertions.assertNull(hashSplitArray[0].getSplitEnd());
+        Assertions.assertNotNull(hashSplitArray[0].getSplitQuery());
+        Assertions.assertTrue(hashSplitArray[0].getSplitQuery().contains("ABS(MD5(`c_varchar`) %"));
+
+        configMap.put("split.string_split_mode", "charset_based");
+        JdbcSourceSplit[] rangeSplitArray =
+                getSplitArrayWithStrategy(configMap, table, "c_varchar", "range");
+        Assertions.assertTrue(rangeSplitArray.length > 1);
+        Assertions.assertNull(rangeSplitArray[0].getSplitQuery());
+        Assertions.assertNull(rangeSplitArray[0].getSplitStart());
+        Assertions.assertTrue(rangeSplitArray[0].getSplitEnd() instanceof String);
+
+        JdbcSourceSplit[] autoSplitArray =
+                getSplitArrayWithStrategy(configMap, table, "c_varchar", "auto");
+        Assertions.assertTrue(autoSplitArray.length > 1);
+        Assertions.assertNull(autoSplitArray[0].getSplitQuery());
+        Assertions.assertNull(autoSplitArray[0].getSplitStart());
+        Assertions.assertTrue(autoSplitArray[0].getSplitEnd() instanceof String);
+
+        mySqlCatalog.close();
+    }
+
+    @Test
     public void testFixedCharSplit() {
         Map<String, Object> configMap = new HashMap<>();
         configMap.put("url", mysqlUrlInfo.getUrlWithDatabase().get());
@@ -677,6 +768,55 @@ public class JdbcMysqlSplitIT extends TestSuiteBase implements TestResource {
                 LOG.error("Error splitting on column {}: {}", charColumn, e.getMessage(), e);
             }
         }
+
+        mySqlCatalog.close();
+    }
+
+    @Test
+    public void testFixedStringSplitStrategy() throws Exception {
+        Map<String, Object> configMap = new HashMap<>();
+        configMap.put("url", mysqlUrlInfo.getUrlWithDatabase().get());
+        configMap.put("driver", "com.mysql.cj.jdbc.Driver");
+        configMap.put("user", MYSQL_USERNAME);
+        configMap.put("password", MYSQL_PASSWORD);
+        configMap.put("table_path", MYSQL_DATABASE + "." + MYSQL_TABLE);
+
+        TablePath tablePathMySql = TablePath.of(MYSQL_DATABASE, MYSQL_TABLE);
+        MySqlCatalog mySqlCatalog =
+                new MySqlCatalog("mysql", MYSQL_USERNAME, MYSQL_PASSWORD, mysqlUrlInfo, null);
+        mySqlCatalog.open();
+        Assertions.assertTrue(mySqlCatalog.tableExists(tablePathMySql));
+        CatalogTable table = mySqlCatalog.getTable(tablePathMySql);
+
+        JdbcSourceSplit[] noneSplitArray =
+                getFixedSplitArrayWithStrategy(configMap, table, "c_varchar", "none");
+        Assertions.assertEquals(1, noneSplitArray.length);
+        Assertions.assertNull(noneSplitArray[0].getSplitQuery());
+        Assertions.assertNull(noneSplitArray[0].getSplitStart());
+        Assertions.assertNull(noneSplitArray[0].getSplitEnd());
+
+        JdbcSourceSplit[] hashSplitArray =
+                getFixedSplitArrayWithStrategy(configMap, table, "c_varchar", "hash");
+        Assertions.assertEquals(4, hashSplitArray.length);
+        Assertions.assertTrue(hashSplitArray[0].getSplitStart() instanceof Integer);
+        Assertions.assertNull(hashSplitArray[0].getSplitEnd());
+        Assertions.assertNotNull(hashSplitArray[0].getSplitQuery());
+        Assertions.assertTrue(hashSplitArray[0].getSplitQuery().contains("ABS(MD5(`c_varchar`) %"));
+
+        configMap.put("split.string_split_mode", "charset_based");
+        JdbcSourceSplit[] rangeSplitArray =
+                getFixedSplitArrayWithStrategy(configMap, table, "c_varchar", "range");
+        Assertions.assertEquals(4, rangeSplitArray.length);
+        Assertions.assertNull(rangeSplitArray[0].getSplitQuery());
+        Assertions.assertNull(rangeSplitArray[0].getSplitStart());
+        Assertions.assertTrue(rangeSplitArray[0].getSplitEnd() instanceof String);
+
+        JdbcSourceSplit[] autoSplitArray =
+                getFixedSplitArrayWithStrategy(configMap, table, "c_varchar", "auto");
+        Assertions.assertEquals(4, autoSplitArray.length);
+        Assertions.assertNull(autoSplitArray[0].getSplitQuery());
+        Assertions.assertNull(autoSplitArray[0].getSplitStart());
+        Assertions.assertTrue(autoSplitArray[0].getSplitEnd() instanceof String);
 
         mySqlCatalog.close();
     }

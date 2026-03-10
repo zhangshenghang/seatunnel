@@ -17,7 +17,9 @@
 
 package org.apache.seatunnel.connectors.seatunnel.jdbc.source;
 
+import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.api.table.catalog.PhysicalColumn;
+import org.apache.seatunnel.api.table.catalog.TableIdentifier;
 import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.api.table.catalog.TableSchema;
 import org.apache.seatunnel.api.table.type.BasicType;
@@ -28,6 +30,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -244,6 +247,52 @@ public class DynamicChunkSplitterTest {
                         DynamicChunkSplitter.ChunkRange.of(4, 5),
                         DynamicChunkSplitter.ChunkRange.of(5, 6),
                         DynamicChunkSplitter.ChunkRange.of(6, null)));
+    }
+
+    @Test
+    public void testCreateStringHashSplits() {
+        JdbcSourceConfig config =
+                JdbcSourceConfig.builder()
+                        .jdbcConnectionConfig(
+                                JdbcConnectionConfig.builder()
+                                        .url("jdbc:postgresql://localhost:5432/test")
+                                        .driverName("org.postgresql.Driver")
+                                        .build())
+                        .stringSplitStrategy(StringSplitStrategy.HASH)
+                        .build();
+
+        DynamicChunkSplitter splitter = new DynamicChunkSplitter(config);
+        TablePath tablePath = TablePath.of("db1", "schema1", "table1");
+        TableSchema tableSchema =
+                TableSchema.builder()
+                        .columns(
+                                Collections.singletonList(
+                                        PhysicalColumn.builder()
+                                                .name("name")
+                                                .sourceType("varchar")
+                                                .dataType(BasicType.STRING_TYPE)
+                                                .build()))
+                        .build();
+        CatalogTable catalogTable =
+                CatalogTable.of(
+                        TableIdentifier.of("default", tablePath),
+                        tableSchema,
+                        Collections.emptyMap(),
+                        Collections.emptyList(),
+                        "");
+        JdbcSourceTable table =
+                JdbcSourceTable.builder().tablePath(tablePath).catalogTable(catalogTable).build();
+
+        List<JdbcSourceSplit> splits =
+                splitter.createStringHashSplits(table, "name", BasicType.STRING_TYPE, 4);
+
+        assertEquals(4, splits.size());
+        assertEquals(0, splits.get(0).getSplitStart());
+        assertNull(splits.get(0).getSplitEnd());
+        assertEquals(
+                "SELECT * FROM \"db1\".\"schema1\".\"table1\" WHERE ABS(MD5(\"name\") % 4) = ?",
+                splits.get(0).getSplitQuery());
+        assertEquals(3, splits.get(3).getSplitStart());
     }
 
     private void check(

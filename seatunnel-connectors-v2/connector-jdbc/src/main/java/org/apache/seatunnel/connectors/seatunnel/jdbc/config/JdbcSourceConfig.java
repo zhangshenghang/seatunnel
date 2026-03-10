@@ -19,6 +19,7 @@ package org.apache.seatunnel.connectors.seatunnel.jdbc.config;
 
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.connectors.seatunnel.jdbc.source.StringSplitMode;
+import org.apache.seatunnel.connectors.seatunnel.jdbc.source.StringSplitStrategy;
 
 import lombok.Builder;
 import lombok.Data;
@@ -48,6 +49,8 @@ public class JdbcSourceConfig implements Serializable {
 
     private StringSplitMode stringSplitMode;
 
+    private StringSplitStrategy stringSplitStrategy;
+
     private String stringSplitModeCollate;
 
     public static JdbcSourceConfig of(ReadonlyConfig config) {
@@ -62,6 +65,7 @@ public class JdbcSourceConfig implements Serializable {
                         && config.getOptional(JdbcSourceOptions.PARTITION_COLUMN).isPresent();
         builder.useDynamicSplitter(!isOldVersion);
         builder.stringSplitMode(config.get(JdbcSourceOptions.STRING_SPLIT_MODE));
+        builder.stringSplitStrategy(resolveStringSplitStrategy(config, isOldVersion));
         builder.stringSplitModeCollate(config.get(JdbcSourceOptions.STRING_SPLIT_MODE_COLLATE));
         builder.splitSize(config.get(JdbcSourceOptions.SPLIT_SIZE));
         builder.splitEvenDistributionFactorUpperBound(
@@ -87,5 +91,26 @@ public class JdbcSourceConfig implements Serializable {
                         });
 
         return builder.build();
+    }
+
+    private static StringSplitStrategy resolveStringSplitStrategy(
+            ReadonlyConfig config, boolean isOldVersion) {
+        if (config.getOptional(JdbcSourceOptions.STRING_SPLIT_STRATEGY).isPresent()) {
+            return config.get(JdbcSourceOptions.STRING_SPLIT_STRATEGY);
+        }
+
+        if (config.getOptional(JdbcSourceOptions.ENABLE_HASH_SPLIT_FOR_STRING_COLUMN).isPresent()) {
+            return config.get(JdbcSourceOptions.ENABLE_HASH_SPLIT_FOR_STRING_COLUMN)
+                    ? StringSplitStrategy.HASH
+                    : StringSplitStrategy.NONE;
+        }
+
+        if (!isOldVersion) {
+            return StringSplitStrategy.RANGE;
+        }
+
+        return StringSplitMode.CHARSET_BASED.equals(config.get(JdbcSourceOptions.STRING_SPLIT_MODE))
+                ? StringSplitStrategy.RANGE
+                : StringSplitStrategy.HASH;
     }
 }

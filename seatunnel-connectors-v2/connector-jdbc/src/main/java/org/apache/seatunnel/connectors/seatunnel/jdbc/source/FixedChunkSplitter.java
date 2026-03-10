@@ -76,14 +76,36 @@ public class FixedChunkSplitter extends ChunkSplitter {
             }
         }
         if (SqlType.STRING.equals(splitKeyType.getSqlType())) {
-            log.info("useNewStringSplitter is {}", useCharsetBasedStringSplitter);
-            if (useCharsetBasedStringSplitter) {
-                return getJdbcSourceStringSplits(table, splitKeyName, splitKeyType);
-            } else {
-                return createStringColumnSplits(table, splitKeyName, splitKeyType);
-            }
+            return createStringSplits(table, splitKeyName, splitKeyType);
         }
         return getJdbcSourceSplits(table, splitKeyName, splitKeyType);
+    }
+
+    private Collection<JdbcSourceSplit> createStringSplits(
+            JdbcSourceTable table, String splitKeyName, SeaTunnelDataType splitKeyType)
+            throws SQLException {
+        switch (config.getStringSplitStrategy()) {
+            case NONE:
+                return Collections.singletonList(createSingleSplit(table));
+            case HASH:
+                return createStringColumnSplits(table, splitKeyName, splitKeyType);
+            case RANGE:
+                return getJdbcSourceStringSplits(table, splitKeyName, splitKeyType);
+            case AUTO:
+                try {
+                    return getJdbcSourceStringSplits(table, splitKeyName, splitKeyType);
+                } catch (Exception e) {
+                    log.warn(
+                            "Range string split failed for table {}, fallback to hash split",
+                            table.getTablePath(),
+                            e);
+                    return createStringColumnSplits(table, splitKeyName, splitKeyType);
+                }
+            default:
+                throw new JdbcConnectorException(
+                        CommonErrorCodeDeprecated.ILLEGAL_ARGUMENT,
+                        "Unsupported string split strategy: " + config.getStringSplitStrategy());
+        }
     }
 
     private Collection<JdbcSourceSplit> getJdbcSourceStringSplits(
@@ -195,7 +217,14 @@ public class FixedChunkSplitter extends ChunkSplitter {
     protected PreparedStatement createSplitStatement(JdbcSourceSplit split, TableSchema schema)
             throws SQLException {
         if (SqlType.STRING.equals(split.getSplitKeyType().getSqlType())
-                && !useCharsetBasedStringSplitter) {
+                && StringSplitStrategy.HASH.equals(config.getStringSplitStrategy())) {
+            return createStringColumnSplitStatement(split);
+        }
+        if (SqlType.STRING.equals(split.getSplitKeyType().getSqlType())
+                && StringSplitStrategy.AUTO.equals(config.getStringSplitStrategy())
+                && split.getSplitQuery() != null
+                && split.getSplitStart() instanceof Integer
+                && split.getSplitEnd() == null) {
             return createStringColumnSplitStatement(split);
         }
         if (split.getSplitStart() == null && split.getSplitEnd() == null) {
