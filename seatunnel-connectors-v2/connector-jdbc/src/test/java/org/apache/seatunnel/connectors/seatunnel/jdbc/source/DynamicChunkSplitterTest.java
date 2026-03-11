@@ -285,12 +285,15 @@ public class DynamicChunkSplitterTest {
 
         List<JdbcSourceSplit> splits =
                 splitter.createStringHashSplits(table, "name", BasicType.STRING_TYPE, 4);
+        String expectedHashExpression = splitter.jdbcDialect.hashModForField("varchar", "name", 4);
 
         assertEquals(4, splits.size());
         assertEquals(0, splits.get(0).getSplitStart());
         assertNull(splits.get(0).getSplitEnd());
         assertEquals(
-                "SELECT * FROM \"db1\".\"schema1\".\"table1\" WHERE ABS(MD5(\"name\") % 4) = ?",
+                String.format(
+                        "SELECT * FROM \"db1\".\"schema1\".\"table1\" WHERE %s = ?",
+                        expectedHashExpression),
                 splits.get(0).getSplitQuery());
         assertEquals(3, splits.get(3).getSplitStart());
     }
