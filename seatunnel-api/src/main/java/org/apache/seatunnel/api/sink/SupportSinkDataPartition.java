@@ -34,4 +34,14 @@ public interface SupportSinkDataPartition<T> {
      * routing is safe for this sink.
      */
     Optional<SinkDataPartitioner<T>> getSinkDataPartitioner(int writerCount);
+    /** Resolves routing on the actual sink, including a multi-table wrapper. */
+    static <T> Optional<SinkDataPartitioner<T>> resolve(
+            SeaTunnelSink<T, ?, ?, ?> sink, int writerCount) {
+        if (writerCount <= 0) {
+            throw new IllegalArgumentException("Sink writer parallelism must be positive");
+        }
+        return sink instanceof SupportSinkDataPartition
+                ? ((SupportSinkDataPartition<T>) sink).getSinkDataPartitioner(writerCount)
+                : Optional.empty();
+    }
 }

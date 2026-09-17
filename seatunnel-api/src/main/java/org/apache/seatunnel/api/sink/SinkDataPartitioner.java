@@ -32,4 +32,12 @@ public interface SinkDataPartitioner<T> extends Serializable {
 
     /** Returns the index of the writer that should receive {@code record}. */
     int select(T record);
+
+    /**
+     * Physical target requiring exclusive writer ownership, or empty when no such check is needed.
+     * Wrappers use this identity at initialization to reject independent writers for one target.
+     */
+    default java.util.Optional<String> targetIdentifier() {
+        return java.util.Optional.empty();
+    }
 }

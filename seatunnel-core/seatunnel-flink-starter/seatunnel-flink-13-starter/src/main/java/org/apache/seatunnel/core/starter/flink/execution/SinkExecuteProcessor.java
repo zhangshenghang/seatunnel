@@ -30,11 +30,8 @@ import org.apache.seatunnel.api.options.EnvCommonOptions;
 import org.apache.seatunnel.api.sink.SaveModeExecuteWrapper;
 import org.apache.seatunnel.api.sink.SaveModeHandler;
 import org.apache.seatunnel.api.sink.SeaTunnelSink;
-import org.apache.seatunnel.api.sink.SinkDataPartitioner;
 import org.apache.seatunnel.api.sink.SupportMultiTableSink;
 import org.apache.seatunnel.api.sink.SupportSaveMode;
-import org.apache.seatunnel.api.sink.SupportSchemaEvolutionSink;
-import org.apache.seatunnel.api.sink.SupportSinkDataPartition;
 import org.apache.seatunnel.api.table.catalog.CatalogTable;
 import org.apache.seatunnel.api.table.catalog.TableIdentifier;
 import org.apache.seatunnel.api.table.catalog.TablePath;
@@ -48,12 +45,8 @@ import org.apache.seatunnel.common.exception.SeaTunnelRuntimeException;
 import org.apache.seatunnel.core.starter.exception.TaskExecuteException;
 import org.apache.seatunnel.plugin.discovery.seatunnel.SeaTunnelFactoryDiscovery;
 import org.apache.seatunnel.plugin.discovery.seatunnel.SeaTunnelSinkPluginDiscovery;
-import org.apache.seatunnel.translation.flink.schema.BroadcastSchemaSinkOperator;
 import org.apache.seatunnel.translation.flink.sink.FlinkSink;
 
-import org.apache.flink.api.common.functions.Partitioner;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 
@@ -214,24 +207,7 @@ public class SinkExecuteProcessor
                                     .toString()
                                     .equalsIgnoreCase(envConfig.getString("job.mode"));
             DataStream<SeaTunnelRow> ds = stream.getDataStream();
-            if (isStreaming && sink instanceof SupportSchemaEvolutionSink) {
-                // insert broadcast-based schema operator to handle schema changes
-                ds =
-                        ds.transform(
-                                        "BroadcastSchemaHandler",
-                                        TypeInformation.of(SeaTunnelRow.class),
-                                        new BroadcastSchemaSinkOperator())
-                                .name("BroadcastSchemaHandler")
-                                .setParallelism(parallelism);
-            }
-            if (sink instanceof SupportSinkDataPartition) {
-                Optional<SinkDataPartitioner<SeaTunnelRow>> partitioner =
-                        ((SupportSinkDataPartition<SeaTunnelRow>) sink)
-                                .getSinkDataPartitioner(parallelism);
-                if (partitioner.isPresent()) {
-                    ds = partitionBySinkDataPartitioner(ds, partitioner.get());
-                }
-            }
+            ds = SinkWriteRoutingPartitioner.prepare(ds, sink, parallelism, isStreaming);
             DataStreamSink<SeaTunnelRow> dataStreamSink =
                     ds.sinkTo(new FlinkSink<>(sink, stream.getCatalogTables(), parallelism))
                             .name(String.format("%s-Sink", sink.getPluginName()));
@@ -250,13 +226,6 @@ public class SinkExecuteProcessor
         }
         // the sink is the last stream
         return null;
-    }
-
-    private DataStream<SeaTunnelRow> partitionBySinkDataPartitioner(
-            DataStream<SeaTunnelRow> stream, SinkDataPartitioner<SeaTunnelRow> partitioner) {
-        return stream.partitionCustom(
-                (Partitioner<Integer>) (partition, numberOfPartitions) -> partition,
-                (KeySelector<SeaTunnelRow, Integer>) partitioner::select);
     }
 
     // if not support multi table, rollback

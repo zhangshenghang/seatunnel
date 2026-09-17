@@ -656,6 +656,14 @@ sink {
 }
 ```
 
+## Flink 固定桶路由
+
+对于 `HASH_FIXED` 表，Flink 将同一物理分区和 bucket 的记录发送给同一个 Sink subtask，包含经过 `MultiTableSink` 包装的任务。并行写入时会增加一次网络 shuffle。其他桶模式保持原有处理路径。
+
+启用路由的多表 Sink 要求 `multi_table_sink_replica = 1`。固定桶与其他桶模式需要配置为独立 Sink；多个源表的独立 Writer 不得指向同一个物理 Paimon 表。这些不安全配置会在任务初始化时明确失败。
+
+分区器使用启动时的源表和目标表 schema。本次修改不新增完整在线 DDL 处理。Schema 控制行按原始 `schema_subtask_id` 分发并绕过数据转换，确保每个 Sink subtask 都收到自己的控制消息。本次修改不改变 checkpoint 序列化、全局提交恢复或扩缩容行为。
+
 ## 变更日志
 
 <ChangeLog />

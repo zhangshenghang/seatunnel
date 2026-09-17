@@ -219,7 +219,8 @@ public class PaimonSink
                 new PaimonFixedBucketPartitioner(
                         catalogTable.getTableSchema().toPhysicalRowDataType(),
                         paimonTable.schema(),
-                        writerCount));
+                        writerCount,
+                        paimonTable.location().toString()));
     }
 
     @Override

@@ -18,6 +18,7 @@
 package org.apache.seatunnel.connectors.seatunnel.paimon.sink.bucket;
 
 import org.apache.seatunnel.api.table.type.BasicType;
+import org.apache.seatunnel.api.table.type.RowKind;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
 
@@ -41,6 +42,8 @@ class PaimonFixedBucketPartitionerTest {
         SeaTunnelRow insert = new SeaTunnelRow(new Object[] {99, "before"});
         SeaTunnelRow delete = new SeaTunnelRow(new Object[] {99, "before"});
         SeaTunnelRow update = new SeaTunnelRow(new Object[] {99, "after"});
+        delete.setRowKind(RowKind.DELETE);
+        update.setRowKind(RowKind.UPDATE_AFTER);
 
         int insertWriter = partitioner.select(insert);
         Assertions.assertEquals(insertWriter, partitioner.select(delete));
