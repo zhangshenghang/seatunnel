@@ -17,6 +17,8 @@
 
 package org.apache.seatunnel.transform.calcite.udf;
 
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
+
 /**
  * SPI for Calcite SQL transform UDFs. Implementations must provide a {@code public static eval}
  * method whose signature determines the SQL function's input/output types; for binary/vector data
@@ -24,6 +26,10 @@ package org.apache.seatunnel.transform.calcite.udf;
  *
  * <p>Annotate the implementation with {@code @AutoService(CalciteUdf.class)} and ship the jar in
  * {@code ${SEATUNNEL_HOME}/lib/} for SPI discovery.
+ *
+ * <p>Because Calcite invokes the static {@code eval} method, job-level env options should be read
+ * from {@link CalciteUdfContext#current()} inside {@code eval}. The {@link #open(ReadonlyConfig)}
+ * callback is useful for one-time initialization.
  */
 public interface CalciteUdf extends AutoCloseable {
 
@@ -32,6 +38,20 @@ public interface CalciteUdf extends AutoCloseable {
 
     /** Open UDF resources. Called once before first eval. */
     default void open() {}
+
+    /**
+     * Open UDF resources with the job-level env options.
+     *
+     * <p>The default implementation delegates to {@link #open()} so existing implementations keep
+     * working. Implementations that need env values should override this variant and avoid storing
+     * job-specific values in static fields (multiple jobs can share a JVM); read them through
+     * {@link CalciteUdfContext#current()} inside {@code eval} instead.
+     *
+     * @param envOptions job-level env options; never {@code null}
+     */
+    default void open(ReadonlyConfig envOptions) {
+        open();
+    }
 
     @Override
     default void close() throws Exception {}

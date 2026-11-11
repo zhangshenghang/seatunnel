@@ -34,6 +34,13 @@ public abstract class AbstractMultiCatalogFlatMapTransform extends AbstractMulti
         super(inputCatalogTables, config);
     }
 
+    public AbstractMultiCatalogFlatMapTransform(
+            List<CatalogTable> inputCatalogTables,
+            ReadonlyConfig config,
+            ReadonlyConfig envOptions) {
+        super(inputCatalogTables, config, envOptions);
+    }
+
     @Override
     protected SeaTunnelTransform<SeaTunnelRow> composeTransforms(
             List<SeaTunnelTransform<SeaTunnelRow>> transforms) {

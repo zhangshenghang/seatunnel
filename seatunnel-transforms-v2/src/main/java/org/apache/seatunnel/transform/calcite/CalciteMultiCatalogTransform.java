@@ -34,6 +34,13 @@ public class CalciteMultiCatalogTransform extends AbstractMultiCatalogFlatMapTra
         super(inputCatalogTables, config);
     }
 
+    public CalciteMultiCatalogTransform(
+            List<CatalogTable> inputCatalogTables,
+            ReadonlyConfig config,
+            ReadonlyConfig envOptions) {
+        super(inputCatalogTables, config, envOptions);
+    }
+
     @Override
     public String getPluginName() {
         return CalciteTransform.PLUGIN_NAME;
@@ -42,7 +49,7 @@ public class CalciteMultiCatalogTransform extends AbstractMultiCatalogFlatMapTra
     @Override
     protected SeaTunnelFlatMapTransform<SeaTunnelRow> buildTransform(
             CatalogTable inputCatalogTable, ReadonlyConfig config) {
-        return new CalciteTransform(config, inputCatalogTable);
+        return new CalciteTransform(config, inputCatalogTable, getEnvOptions());
     }
 
     /** Mirrors the mandatory options of the transform-level rule declared by the factory. */

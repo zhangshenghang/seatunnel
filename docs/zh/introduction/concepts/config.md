@@ -82,6 +82,32 @@ sink {
 
 如果您想查看完整参数列表、引擎专属前缀和更多示例，请继续阅读 [JobEnvConfig](../configuration/JobEnvConfig.md)。
 
+#### 供插件与 UDF 使用的自定义参数
+
+`env.custom_parameters` 用于定义作业级键值对，插件和 SQL UDF 可以直接读取，无需在每个插件块中重复配置：
+
+```hocon
+env {
+  job.mode = "BATCH"
+  custom_parameters {
+    my_key = "my_value"
+  }
+}
+```
+
+在 Zeta 引擎中：
+
+- `TableSourceFactory`、`TableSinkFactory`、`TableTransformFactory` 的实现可以通过 `context.getEnvOptions()` 读取，例如 `context.getEnvOptions().get(EnvCommonOptions.CUSTOM_PARAMETERS).get("my_key")`。
+- `Sql` transform 使用的自定义 `ZetaUDF` 可以重写 `open(ReadonlyConfig envOptions)`，把参数保存到实例字段中；原有的 `open()` 行为保持不变。
+- `Calcite` transform 使用的自定义 `CalciteUdf` 可以在静态 `eval` 方法中通过 `CalciteUdfContext.current().getEnvOptions()` 读取。Calcite 以静态方式调用 UDF，因此不要把作业级参数保存到静态字段中。
+
+限制说明：
+
+- Flink 和 Spark 执行时，插件工厂与 UDF 目前拿到的是空 env，该能力仅在 Zeta 引擎生效。
+- `ZetaUDF.resultType(...)` 在 schema 推导阶段、`open(...)` 之前调用，暂时无法读取 env。
+- Calcite UDF 的静态 `eval` 也可能在规划期（常量折叠）执行，此时 `CalciteUdfContext.current()` 为 `null`，需要判空。
+- `env` 块不参与配置加解密（`ConfigShadeUtils` 只处理 `source`、`sink` 和 `transform`），因此不要在其中放置加密值或敏感信息。
+
 ### `source`：数据读取入口
 
 `source` 用来定义 SeaTunnel 从哪里读取数据。一个作业中可以同时声明多个 source。每个连接器都有自己的参数，同时也有一些通用的链路字段，例如 `plugin_output`，它用于给当前 source 产出的数据集命名，方便后续模块引用。

@@ -61,6 +61,7 @@ public class CalciteTransformFactory implements TableTransformFactory {
     @Override
     public TableTransform createTransform(TableTransformFactoryContext context) {
         return () ->
-                new CalciteMultiCatalogTransform(context.getCatalogTables(), context.getOptions());
+                new CalciteMultiCatalogTransform(
+                        context.getCatalogTables(), context.getOptions(), context.getEnvOptions());
     }
 }

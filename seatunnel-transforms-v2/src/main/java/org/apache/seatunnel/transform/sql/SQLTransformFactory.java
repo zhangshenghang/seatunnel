@@ -61,6 +61,6 @@ public class SQLTransformFactory implements TableTransformFactory {
     public TableTransform createTransform(TableTransformFactoryContext context) {
         return () ->
                 new SQLMultiCatalogFlatMapTransform(
-                        context.getCatalogTables(), context.getOptions());
+                        context.getCatalogTables(), context.getOptions(), context.getEnvOptions());
     }
 }

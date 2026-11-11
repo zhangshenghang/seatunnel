@@ -39,6 +39,21 @@
 
 更多详细信息，您可以参考文档 [Config Encryption Decryption](./config-encryption-decryption.md)
 
+### custom_parameters
+
+供插件和 SQL UDF 使用的作业级自定义键值对：
+
+```hocon
+env {
+  job.mode = "BATCH"
+  custom_parameters {
+    my_key = "my_value"
+  }
+}
+```
+
+在 Zeta 引擎中，插件工厂可通过 `TableFactoryContext#getEnvOptions()` 读取；`ZetaUDF` 实现通过 `open(ReadonlyConfig envOptions)` 接收；`CalciteUdf` 实现可在静态 `eval` 方法中通过 `CalciteUdfContext.current().getEnvOptions()` 读取。详细说明与限制请参考 [配置文件入门](../concepts/config.md#供插件与-udf-使用的自定义参数)。
+
 ## Zeta 引擎参数
 
 ### job.retry.times

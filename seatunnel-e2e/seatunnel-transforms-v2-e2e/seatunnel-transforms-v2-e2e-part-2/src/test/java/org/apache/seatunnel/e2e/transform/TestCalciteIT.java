@@ -17,7 +17,9 @@
 
 package org.apache.seatunnel.e2e.transform;
 
+import org.apache.seatunnel.e2e.common.container.EngineType;
 import org.apache.seatunnel.e2e.common.container.TestContainer;
+import org.apache.seatunnel.e2e.common.junit.DisabledOnContainer;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.TestTemplate;
@@ -62,6 +64,18 @@ public class TestCalciteIT extends TestSuiteBase {
             throws IOException, InterruptedException {
         Container.ExecResult result =
                 container.executeJob("/calcite_transform/calcite_des_udf.conf");
+        Assertions.assertEquals(0, result.getExitCode());
+    }
+
+    @DisabledOnContainer(
+            value = {},
+            type = {EngineType.SPARK, EngineType.FLINK},
+            disabledReason = "Env options are only propagated on Zeta")
+    @TestTemplate
+    public void testCalciteUdfReadsEnvOptions(TestContainer container)
+            throws IOException, InterruptedException {
+        Container.ExecResult result =
+                container.executeJob("/calcite_transform/calcite_env_udf.conf");
         Assertions.assertEquals(0, result.getExitCode());
     }
 

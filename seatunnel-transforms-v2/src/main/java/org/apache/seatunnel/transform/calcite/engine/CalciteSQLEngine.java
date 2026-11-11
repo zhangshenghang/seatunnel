@@ -36,6 +36,7 @@ import org.apache.seatunnel.shade.org.apache.calcite.tools.Frameworks;
 import org.apache.seatunnel.shade.org.apache.calcite.tools.Planner;
 import org.apache.seatunnel.shade.org.apache.calcite.tools.Programs;
 
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
@@ -65,6 +66,7 @@ public class CalciteSQLEngine implements AutoCloseable {
     private final String sql;
     private final String tableName;
     private final SeaTunnelRowType inputRowType;
+    private final ReadonlyConfig envOptions;
 
     private SchemaPlus rootSchema;
     private SeaTunnelScannableTable scannableTable;
@@ -76,9 +78,19 @@ public class CalciteSQLEngine implements AutoCloseable {
     private SeaTunnelDataContext dataContext;
 
     public CalciteSQLEngine(String sql, String tableName, SeaTunnelRowType inputRowType) {
+        this(sql, tableName, inputRowType, ReadonlyConfig.fromMap(Collections.emptyMap()));
+    }
+
+    public CalciteSQLEngine(
+            String sql,
+            String tableName,
+            SeaTunnelRowType inputRowType,
+            ReadonlyConfig envOptions) {
         this.sql = sql;
         this.tableName = tableName;
         this.inputRowType = inputRowType;
+        this.envOptions =
+                envOptions == null ? ReadonlyConfig.fromMap(Collections.emptyMap()) : envOptions;
     }
 
     /**
@@ -97,7 +109,7 @@ public class CalciteSQLEngine implements AutoCloseable {
                             rootSchema, tableName, inputRowType, typeFactory);
 
             builtinFunctions = new BuiltinFunctions();
-            builtinFunctions.discoverAndRegister(rootSchema);
+            builtinFunctions.discoverAndRegister(rootSchema, envOptions);
             dataContext = new SeaTunnelDataContext(rootSchema, typeFactory);
 
             SqlParser.Config parserConfig =
@@ -167,7 +179,7 @@ public class CalciteSQLEngine implements AutoCloseable {
 
         List<SeaTunnelRow> results = new ArrayList<>();
         try (CalciteUdfContext.Scope ignored =
-                CalciteUdfContext.enter(inputRow.getTableId(), inputRow.getRowKind())) {
+                CalciteUdfContext.enter(inputRow.getTableId(), inputRow.getRowKind(), envOptions)) {
             for (Object rawRow : bindable.bind(dataContext)) {
                 Object[] row;
                 if (rawRow instanceof Object[]) {

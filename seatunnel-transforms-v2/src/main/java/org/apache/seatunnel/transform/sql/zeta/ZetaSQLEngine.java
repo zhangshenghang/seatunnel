@@ -19,6 +19,7 @@ package org.apache.seatunnel.transform.sql.zeta;
 
 import org.apache.seatunnel.shade.com.google.common.collect.Lists;
 
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
@@ -75,6 +76,9 @@ public class ZetaSQLEngine implements SQLEngine {
     private Integer allColumnsCount = null;
     private boolean udfOpened;
 
+    /** Job-level env options passed to UDFs when they are opened. */
+    private ReadonlyConfig envOptions = ReadonlyConfig.fromMap(Collections.emptyMap());
+
     /**
      * Field indexes for the common {@code SELECT source_column AS target_column} projection.
      * Keeping this plan avoids evaluating a full SQL expression tree for every row.
@@ -89,6 +93,23 @@ public class ZetaSQLEngine implements SQLEngine {
             String catalogTableName,
             SeaTunnelRowType inputRowType,
             String sql) {
+        init(
+                inputTableName,
+                catalogTableName,
+                inputRowType,
+                sql,
+                ReadonlyConfig.fromMap(Collections.emptyMap()));
+    }
+
+    @Override
+    public void init(
+            String inputTableName,
+            String catalogTableName,
+            SeaTunnelRowType inputRowType,
+            String sql,
+            ReadonlyConfig envOptions) {
+        this.envOptions =
+                envOptions == null ? ReadonlyConfig.fromMap(Collections.emptyMap()) : envOptions;
         this.inputTableName = inputTableName;
         this.catalogTableName = catalogTableName;
         this.inputRowType = inputRowType;
@@ -115,7 +136,7 @@ public class ZetaSQLEngine implements SQLEngine {
         for (int i = 0; i < udfList.size(); i++) {
             ZetaUDF udf = udfList.get(i);
             try {
-                udf.open();
+                udf.open(envOptions);
             } catch (Exception e) {
                 try {
                     udf.close();

@@ -39,6 +39,13 @@ public class SQLMultiCatalogFlatMapTransform extends AbstractMultiCatalogFlatMap
         super(inputCatalogTables, config);
     }
 
+    public SQLMultiCatalogFlatMapTransform(
+            List<CatalogTable> inputCatalogTables,
+            ReadonlyConfig config,
+            ReadonlyConfig envOptions) {
+        super(inputCatalogTables, config, envOptions);
+    }
+
     @Override
     public String getPluginName() {
         return SQLTransform.PLUGIN_NAME;
@@ -47,7 +54,7 @@ public class SQLMultiCatalogFlatMapTransform extends AbstractMultiCatalogFlatMap
     @Override
     protected SeaTunnelFlatMapTransform<SeaTunnelRow> buildTransform(
             CatalogTable inputCatalogTable, ReadonlyConfig config) {
-        return new SQLTransform(config, inputCatalogTable);
+        return new SQLTransform(config, inputCatalogTable, getEnvOptions());
     }
 
     /** Mirrors the mandatory options of the transform-level rule declared by the factory. */

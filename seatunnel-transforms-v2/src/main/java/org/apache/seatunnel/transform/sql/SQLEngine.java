@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.transform.sql;
 
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.table.type.SeaTunnelRow;
 import org.apache.seatunnel.api.table.type.SeaTunnelRowType;
 
@@ -28,6 +29,21 @@ public interface SQLEngine {
             String catalogTableName,
             SeaTunnelRowType inputRowType,
             String sql);
+
+    /**
+     * Initializes the engine with the job-level env options.
+     *
+     * <p>The default implementation ignores the env options and delegates to the four-argument
+     * variant so that custom SQL engines keep working.
+     */
+    default void init(
+            String inputTableName,
+            String catalogTableName,
+            SeaTunnelRowType inputRowType,
+            String sql,
+            ReadonlyConfig envOptions) {
+        init(inputTableName, catalogTableName, inputRowType, sql);
+    }
 
     SeaTunnelRowType typeMapping(List<String> inputColumnsMapping);
 

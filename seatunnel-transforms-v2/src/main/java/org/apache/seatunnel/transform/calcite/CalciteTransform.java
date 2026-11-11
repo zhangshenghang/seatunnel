@@ -41,6 +41,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -54,7 +55,20 @@ public class CalciteTransform extends AbstractCatalogSupportFlatMapTransform {
     private final String inputTableName;
     private transient CalciteSQLEngine engine;
 
+    /**
+     * Job-level env options. It is serialized with the transform so that the transient Calcite
+     * engine can be rebuilt with the same env on the worker side.
+     */
+    private final ReadonlyConfig envOptions;
+
     public CalciteTransform(@NonNull ReadonlyConfig config, @NonNull CatalogTable catalogTable) {
+        this(config, catalogTable, ReadonlyConfig.fromMap(Collections.emptyMap()));
+    }
+
+    public CalciteTransform(
+            @NonNull ReadonlyConfig config,
+            @NonNull CatalogTable catalogTable,
+            ReadonlyConfig envOptions) {
         super(catalogTable, config.get(TransformCommonOptions.ROW_ERROR_HANDLE_WAY_OPTION));
         this.sql = config.get(CalciteTransformConfig.SQL);
         List<String> pluginInputIdentifiers = config.get(ConnectorCommonOptions.PLUGIN_INPUT);
@@ -63,6 +77,8 @@ public class CalciteTransform extends AbstractCatalogSupportFlatMapTransform {
         } else {
             this.inputTableName = catalogTable.getTableId().getTableName();
         }
+        this.envOptions =
+                envOptions == null ? ReadonlyConfig.fromMap(Collections.emptyMap()) : envOptions;
     }
 
     @Override
@@ -72,7 +88,9 @@ public class CalciteTransform extends AbstractCatalogSupportFlatMapTransform {
 
     @Override
     public void open() {
-        engine = new CalciteSQLEngine(sql, inputTableName, inputCatalogTable.getSeaTunnelRowType());
+        engine =
+                new CalciteSQLEngine(
+                        sql, inputTableName, inputCatalogTable.getSeaTunnelRowType(), envOptions);
         engine.init();
     }
 

@@ -52,11 +52,27 @@ public abstract class AbstractMultiCatalogTransform implements SeaTunnelTransfor
     // serialized.
     protected final transient ReadonlyConfig transformLevelConfig;
 
+    /**
+     * Job-level env options handed over from the transform factory. It has to be assigned before
+     * the per-table transforms are built at the end of this constructor, because {@link
+     * #buildTransform} is invoked from here.
+     */
+    private final ReadonlyConfig envOptions;
+
     public AbstractMultiCatalogTransform(
             List<CatalogTable> inputCatalogTables, ReadonlyConfig config) {
+        this(inputCatalogTables, config, ReadonlyConfig.fromMap(Collections.emptyMap()));
+    }
+
+    public AbstractMultiCatalogTransform(
+            List<CatalogTable> inputCatalogTables,
+            ReadonlyConfig config,
+            ReadonlyConfig envOptions) {
         this.inputCatalogTables = inputCatalogTables;
         this.transformMap = new HashMap<>();
         this.transformLevelConfig = config;
+        this.envOptions =
+                envOptions == null ? ReadonlyConfig.fromMap(Collections.emptyMap()) : envOptions;
         Pattern tableMatchRegex =
                 Pattern.compile(config.get(TransformCommonOptions.TABLE_MATCH_REGEX));
         boolean ruleMatchModeConfigured =
@@ -124,6 +140,15 @@ public abstract class AbstractMultiCatalogTransform implements SeaTunnelTransfor
 
     protected abstract SeaTunnelTransform<SeaTunnelRow> buildTransform(
             CatalogTable inputCatalogTable, ReadonlyConfig config);
+
+    /**
+     * Returns the job-level env options for subclasses that build per-table transforms.
+     *
+     * <p>Never {@code null}; an empty config is returned when no env was supplied.
+     */
+    protected ReadonlyConfig getEnvOptions() {
+        return envOptions;
+    }
 
     private void rejectDuplicateTablePaths(List<ReadonlyConfig> tableConfigs) {
         Map<String, Boolean> tablePaths = new HashMap<>();

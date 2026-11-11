@@ -39,6 +39,9 @@ import org.apache.seatunnel.api.table.catalog.TableIdentifier;
 import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.api.table.catalog.TableSchema;
 import org.apache.seatunnel.api.table.type.BasicType;
+import org.apache.seatunnel.api.table.type.SeaTunnelRow;
+import org.apache.seatunnel.api.transform.SeaTunnelFlatMapTransform;
+import org.apache.seatunnel.api.transform.SeaTunnelTransform;
 import org.apache.seatunnel.common.config.Common;
 import org.apache.seatunnel.common.config.DeployMode;
 import org.apache.seatunnel.core.starter.utils.ConfigBuilder;
@@ -50,6 +53,7 @@ import org.apache.seatunnel.engine.common.utils.IdGenerator;
 import org.apache.seatunnel.engine.core.classloader.ClassLoaderService;
 import org.apache.seatunnel.engine.core.dag.actions.Action;
 import org.apache.seatunnel.engine.core.dag.actions.SinkAction;
+import org.apache.seatunnel.engine.core.dag.actions.TransformAction;
 import org.apache.seatunnel.engine.core.parse.MultipleTableJobConfigParser;
 
 import org.junit.jupiter.api.Assertions;
@@ -57,7 +61,11 @@ import org.junit.jupiter.api.Test;
 
 import scala.Tuple2;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.net.URL;
 import java.nio.file.Paths;
@@ -524,6 +532,85 @@ public class MultipleTableJobConfigParserTest {
         Assertions.assertEquals("test_db.test_schema.table2", failedTable.getTablePath());
         Assertions.assertEquals(MultiTableFailurePhase.DISCOVERY, failedTable.getPhase());
         Assertions.assertTrue(failedTable.getMessageSummary().contains("metadata read failed"));
+    }
+
+    @Test
+    public void testEnvOptionsReachTransformAndSurviveSerialization() throws Exception {
+        Common.setDeployMode(DeployMode.CLIENT);
+        ParserEnvProbeUdf.reset();
+        String filePath =
+                ContentFormatUtilTest.getResource("/batch_fake_to_console_with_sql_env.conf");
+        JobConfig jobConfig = new JobConfig();
+        jobConfig.setJobContext(new JobContext());
+
+        ImmutablePair<List<Action>, Set<URL>> parsed =
+                new MultipleTableJobConfigParser(filePath, new IdGenerator(), jobConfig)
+                        .parse(null);
+
+        TransformAction transformAction = findTransformAction(parsed);
+
+        // Simulate the client -> worker hop: the env options must be serialized with the transform.
+        SeaTunnelTransform<?> transform = serializeRoundTrip(transformAction.getTransform());
+        Assertions.assertTrue(transform instanceof SeaTunnelFlatMapTransform);
+
+        SeaTunnelRow inputRow = new SeaTunnelRow(new Object[] {1, "hello"});
+        inputRow.setTableId(
+                transform.getProducedCatalogTables().get(0).getTableId().toTablePath().toString());
+        List<SeaTunnelRow> output =
+                ((SeaTunnelFlatMapTransform<SeaTunnelRow>) transform).flatMap(inputRow);
+
+        Assertions.assertNotNull(output);
+        Assertions.assertEquals(1, output.size());
+        Assertions.assertEquals("env-value", ParserEnvProbeUdf.lastOpenedEnvValue());
+        Assertions.assertEquals("env-value:hello", output.get(0).getField(1));
+    }
+
+    @Test
+    public void testEnvOptionsReachCalciteUdfAndSurviveSerialization() throws Exception {
+        Common.setDeployMode(DeployMode.CLIENT);
+        String filePath =
+                ContentFormatUtilTest.getResource("/batch_fake_to_console_with_calcite_env.conf");
+        JobConfig jobConfig = new JobConfig();
+        jobConfig.setJobContext(new JobContext());
+
+        ImmutablePair<List<Action>, Set<URL>> parsed =
+                new MultipleTableJobConfigParser(filePath, new IdGenerator(), jobConfig)
+                        .parse(null);
+
+        TransformAction transformAction = findTransformAction(parsed);
+        SeaTunnelTransform<?> transform = serializeRoundTrip(transformAction.getTransform());
+
+        SeaTunnelRow inputRow = new SeaTunnelRow(new Object[] {1, "hello"});
+        inputRow.setTableId(
+                transform.getProducedCatalogTables().get(0).getTableId().toTablePath().toString());
+        List<SeaTunnelRow> output =
+                ((SeaTunnelFlatMapTransform<SeaTunnelRow>) transform).flatMap(inputRow);
+
+        Assertions.assertNotNull(output);
+        Assertions.assertEquals(1, output.size());
+        Assertions.assertEquals("env-value:hello", output.get(0).getField(1));
+    }
+
+    private static TransformAction findTransformAction(
+            ImmutablePair<List<Action>, Set<URL>> parsed) {
+        return parsed.getLeft().stream()
+                .flatMap(action -> action.getUpstream().stream())
+                .filter(TransformAction.class::isInstance)
+                .map(TransformAction.class::cast)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("No transform action was created"));
+    }
+
+    private static SeaTunnelTransform<?> serializeRoundTrip(SeaTunnelTransform<?> transform)
+            throws IOException, ClassNotFoundException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
+            output.writeObject(transform);
+        }
+        try (ObjectInputStream input =
+                new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            return (SeaTunnelTransform<?>) input.readObject();
+        }
     }
 
     private CatalogTable mockCatalogTable(String tableName) {

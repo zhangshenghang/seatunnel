@@ -21,11 +21,14 @@ import org.apache.seatunnel.shade.org.apache.calcite.schema.ScalarFunction;
 import org.apache.seatunnel.shade.org.apache.calcite.schema.SchemaPlus;
 import org.apache.seatunnel.shade.org.apache.calcite.schema.impl.ScalarFunctionImpl;
 
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
+
 import lombok.extern.slf4j.Slf4j;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.ServiceLoader;
@@ -41,6 +44,16 @@ public final class BuiltinFunctions {
      * registers their static {@code eval} methods into the given Calcite schema.
      */
     public void discoverAndRegister(SchemaPlus schema) {
+        discoverAndRegister(schema, ReadonlyConfig.fromMap(Collections.emptyMap()));
+    }
+
+    /**
+     * Discovers and registers UDFs, passing the job-level env options to {@link
+     * CalciteUdf#open(ReadonlyConfig)}.
+     */
+    public void discoverAndRegister(SchemaPlus schema, ReadonlyConfig envOptions) {
+        ReadonlyConfig effectiveEnvOptions =
+                envOptions == null ? ReadonlyConfig.fromMap(Collections.emptyMap()) : envOptions;
         ClassLoader cl = Thread.currentThread().getContextClassLoader();
         ServiceLoader.load(CalciteUdf.class, cl)
                 .forEach(
@@ -70,7 +83,7 @@ public final class BuiltinFunctions {
                                             name);
                                     return;
                                 }
-                                udf.open();
+                                udf.open(effectiveEnvOptions);
                                 opened = true;
                                 schema.add(name, function);
                                 loadedUdfs.add(udf);

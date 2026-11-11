@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.transform.sql.zeta;
 
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
 
 import java.io.Serializable;
@@ -68,6 +69,19 @@ public interface ZetaUDF extends Serializable {
 
     /** Initialize udf resources. */
     default void open() throws Exception {}
+
+    /**
+     * Initialize udf resources with the job-level env options.
+     *
+     * <p>UDFs that need user-defined parameters from the job {@code env} block can override this
+     * method instead of {@link #open()}. The default implementation delegates to {@link #open()} so
+     * existing implementations keep working.
+     *
+     * @param envOptions job-level env options; never {@code null}
+     */
+    default void open(ReadonlyConfig envOptions) throws Exception {
+        open();
+    }
 
     /** Release udf resources. */
     default void close() {}

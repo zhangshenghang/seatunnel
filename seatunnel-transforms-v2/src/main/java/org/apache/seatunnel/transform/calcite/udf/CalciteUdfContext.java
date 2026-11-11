@@ -17,6 +17,7 @@
 
 package org.apache.seatunnel.transform.calcite.udf;
 
+import org.apache.seatunnel.api.configuration.ReadonlyConfig;
 import org.apache.seatunnel.api.table.catalog.TablePath;
 import org.apache.seatunnel.api.table.type.RowKind;
 
@@ -24,10 +25,12 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.Objects;
 
 /**
- * Thread-local row context exposing per-row metadata (table id, {@link RowKind}) to Calcite UDFs.
+ * Thread-local row context exposing per-row metadata (table id, {@link RowKind}) and job-level env
+ * options to Calcite UDFs.
  *
  * <p>UDFs read it via {@link #current()}; the engine opens a {@link Scope} around each row.
  */
@@ -42,6 +45,7 @@ public final class CalciteUdfContext {
     private @Nullable String schema;
     private @Nullable String table;
     private @Nullable RowKind rowKind;
+    private ReadonlyConfig envOptions = ReadonlyConfig.fromMap(Collections.emptyMap());
 
     private CalciteUdfContext() {}
 
@@ -63,19 +67,39 @@ public final class CalciteUdfContext {
      * their parent.
      */
     public static Scope enter(@Nullable String tableId, @Nullable RowKind rowKind) {
+        return enter(tableId, rowKind, ReadonlyConfig.fromMap(Collections.emptyMap()));
+    }
+
+    /**
+     * Opens a UDF execution scope bound to the current thread, populated with the given row
+     * metadata and job-level env options.
+     *
+     * <p>If a scope already exists on this thread (e.g. nested SQL transforms), the existing
+     * context instance is reused and its metadata and env options are refreshed; nested scopes do
+     * not tear down their parent.
+     */
+    public static Scope enter(
+            @Nullable String tableId,
+            @Nullable RowKind rowKind,
+            @Nullable ReadonlyConfig envOptions) {
         CalciteUdfContext existing = HOLDER.get();
         if (existing != null) {
-            existing.update(tableId, rowKind);
+            existing.update(tableId, rowKind, envOptions);
             return Scope.NOOP;
         }
         CalciteUdfContext fresh = new CalciteUdfContext();
-        fresh.update(tableId, rowKind);
+        fresh.update(tableId, rowKind, envOptions);
         HOLDER.set(fresh);
         return HOLDER::remove;
     }
 
-    private void update(@Nullable String tableId, @Nullable RowKind rowKind) {
+    private void update(
+            @Nullable String tableId,
+            @Nullable RowKind rowKind,
+            @Nullable ReadonlyConfig envOptions) {
         this.rowKind = rowKind;
+        this.envOptions =
+                envOptions == null ? ReadonlyConfig.fromMap(Collections.emptyMap()) : envOptions;
         updateTableId(tableId);
     }
 
@@ -133,6 +157,13 @@ public final class CalciteUdfContext {
 
     @Nullable public RowKind getRowKind() {
         return rowKind;
+    }
+
+    /**
+     * Job-level env options; never {@code null}. Returns an empty config when no env was supplied.
+     */
+    public ReadonlyConfig getEnvOptions() {
+        return envOptions;
     }
 
     /**

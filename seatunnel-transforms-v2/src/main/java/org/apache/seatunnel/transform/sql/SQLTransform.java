@@ -48,6 +48,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
@@ -78,7 +79,20 @@ public class SQLTransform extends AbstractCatalogSupportFlatMapTransform
 
     private final String inputTableName;
 
+    /**
+     * Job-level env options. It is serialized with the transform so that the transient SQL engine
+     * can be rebuilt with the same env on the worker side.
+     */
+    private final ReadonlyConfig envOptions;
+
     public SQLTransform(@NonNull ReadonlyConfig config, @NonNull CatalogTable catalogTable) {
+        this(config, catalogTable, ReadonlyConfig.fromMap(Collections.emptyMap()));
+    }
+
+    public SQLTransform(
+            @NonNull ReadonlyConfig config,
+            @NonNull CatalogTable catalogTable,
+            ReadonlyConfig envOptions) {
         super(catalogTable);
         this.query = config.get(KEY_QUERY);
         if (config.getOptional(KEY_ENGINE).isPresent()) {
@@ -93,6 +107,8 @@ public class SQLTransform extends AbstractCatalogSupportFlatMapTransform
         } else {
             this.inputTableName = catalogTable.getTableId().getTableName();
         }
+        this.envOptions =
+                envOptions == null ? ReadonlyConfig.fromMap(Collections.emptyMap()) : envOptions;
     }
 
     @Override
@@ -107,7 +123,8 @@ public class SQLTransform extends AbstractCatalogSupportFlatMapTransform
                 inputTableName,
                 inputCatalogTable.getTableId().getTableName(),
                 inputCatalogTable.getSeaTunnelRowType(),
-                query);
+                query,
+                envOptions);
     }
 
     private void tryOpen() {
