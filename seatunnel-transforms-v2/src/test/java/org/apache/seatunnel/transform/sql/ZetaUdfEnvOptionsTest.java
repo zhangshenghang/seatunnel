@@ -107,9 +107,51 @@ public class ZetaUdfEnvOptionsTest {
         Assertions.assertEquals("null:hello", output.get(0).getField(0));
     }
 
+    @Test
+    public void testEnvIsIsolatedAcrossTransforms() {
+        ZetaEnvProbeUdf.reset();
+
+        SeaTunnelTransform<?> transformA = buildTransform(envOptions("env-A"));
+        SeaTunnelTransform<?> transformB = buildTransform(envOptions("env-B"));
+
+        Assertions.assertEquals("env-A:hello", flatMap(transformA, "hello").get(0).getField(0));
+        Assertions.assertEquals("env-B:hello", flatMap(transformB, "hello").get(0).getField(0));
+        Assertions.assertEquals("env-A:again", flatMap(transformA, "again").get(0).getField(0));
+    }
+
+    private SeaTunnelTransform<?> buildTransform(ReadonlyConfig envOptions) {
+        SeaTunnelRowType rowType =
+                new SeaTunnelRowType(
+                        new String[] {"id", "name"},
+                        new SeaTunnelDataType[] {BasicType.INT_TYPE, BasicType.STRING_TYPE});
+        CatalogTable catalogTable = CatalogTableUtil.getCatalogTable("test", rowType);
+
+        Map<String, Object> transformOptions = new HashMap<>();
+        transformOptions.put(
+                SQLTransform.KEY_QUERY.key(),
+                "select " + ZetaEnvProbeUdf.FUNCTION_NAME + "(name) as name from test");
+        return FactoryUtil.createAndPrepareMultiTableTransform(
+                Collections.singletonList(catalogTable),
+                ReadonlyConfig.fromMap(transformOptions),
+                getClass().getClassLoader(),
+                "Sql",
+                envOptions);
+    }
+
+    private static List<SeaTunnelRow> flatMap(SeaTunnelTransform<?> transform, String fieldValue) {
+        SeaTunnelRow inputRow = new SeaTunnelRow(new Object[] {1, fieldValue});
+        inputRow.setTableId(
+                transform.getProducedCatalogTables().get(0).getTableId().toTablePath().toString());
+        return ((SeaTunnelFlatMapTransform<SeaTunnelRow>) transform).flatMap(inputRow);
+    }
+
     private static ReadonlyConfig envOptions() {
+        return envOptions("env-value");
+    }
+
+    private static ReadonlyConfig envOptions(String probe) {
         Map<String, Object> customParameters = new HashMap<>();
-        customParameters.put("probe", "env-value");
+        customParameters.put("probe", probe);
         Map<String, Object> env = new HashMap<>();
         env.put("custom_parameters", customParameters);
         return ReadonlyConfig.fromMap(env);

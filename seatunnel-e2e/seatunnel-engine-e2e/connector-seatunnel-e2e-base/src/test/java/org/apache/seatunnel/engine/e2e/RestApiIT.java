@@ -1461,6 +1461,88 @@ public class RestApiIT {
                         });
     }
 
+    @Test
+    public void testSubmitJobWithEnvOptionsReachingUdf() {
+        String hoconConfig =
+                "env {\n"
+                        + "  parallelism = 1\n"
+                        + "  job.mode = \"BATCH\"\n"
+                        + "  custom_parameters {\n"
+                        + "    probe = \"env-value\"\n"
+                        + "  }\n"
+                        + "}\n"
+                        + "\n"
+                        + "source {\n"
+                        + "  FakeSource {\n"
+                        + "    plugin_output = \"fake\"\n"
+                        + "    schema = {\n"
+                        + "      fields {\n"
+                        + "        id = \"int\"\n"
+                        + "        name = \"string\"\n"
+                        + "      }\n"
+                        + "    }\n"
+                        + "    rows = [\n"
+                        + "      {fields = [1, \"Hello World\"], kind = INSERT}\n"
+                        + "    ]\n"
+                        + "  }\n"
+                        + "}\n"
+                        + "\n"
+                        + "transform {\n"
+                        + "  Sql {\n"
+                        + "    plugin_input = \"fake\"\n"
+                        + "    plugin_output = \"fake1\"\n"
+                        + "    query = \"select id, ENV_PROBE(name) as name from dual\"\n"
+                        + "  }\n"
+                        + "}\n"
+                        + "\n"
+                        + "sink {\n"
+                        + "  Assert {\n"
+                        + "    plugin_input = \"fake1\"\n"
+                        + "    rules {\n"
+                        + "      field_rules = [\n"
+                        + "        {\n"
+                        + "          field_name = \"id\"\n"
+                        + "          field_type = \"int\"\n"
+                        + "          field_value = [{equals_to = 1}]\n"
+                        + "        },\n"
+                        + "        {\n"
+                        + "          field_name = \"name\"\n"
+                        + "          field_type = \"string\"\n"
+                        + "          field_value = [{equals_to = \"env-value:Hello World\"}]\n"
+                        + "        }\n"
+                        + "      ]\n"
+                        + "    }\n"
+                        + "  }\n"
+                        + "}";
+
+        String baseUrl =
+                HOST + node1.getCluster().getLocalMember().getAddress().getPort() + CONTEXT_PATH;
+        long jobId =
+                given().body(hoconConfig)
+                        .queryParam("format", "hocon")
+                        .queryParam("jobName", "env-udf-rest-job")
+                        .post(baseUrl + "/submit-job")
+                        .then()
+                        .statusCode(200)
+                        .body("jobId", notNullValue())
+                        .extract()
+                        .jsonPath()
+                        .getLong("jobId");
+
+        Awaitility.await()
+                .atMost(2, TimeUnit.MINUTES)
+                .untilAsserted(
+                        () ->
+                                given().get(
+                                                baseUrl
+                                                        + RestConstant.REST_URL_RUNNING_JOB
+                                                        + "/"
+                                                        + jobId)
+                                        .then()
+                                        .statusCode(200)
+                                        .body("jobStatus", equalTo("FINISHED")));
+    }
+
     /**
      * HOCON bodies are parsed by the HOCON parser before the submit flow decrypts them. A key such
      * as {@code "$systemId"} has to be quoted in the body, because {@code $} is a reserved HOCON
