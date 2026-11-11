@@ -48,6 +48,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class CalciteTransform extends AbstractCatalogSupportFlatMapTransform {
+    private static final long serialVersionUID = 426108317364037266L;
 
     public static final String PLUGIN_NAME = "Calcite";
 

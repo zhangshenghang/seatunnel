@@ -58,6 +58,8 @@ import static org.apache.seatunnel.transform.sql.SQLEngineFactory.EngineType.ZET
 @Slf4j
 public class SQLTransform extends AbstractCatalogSupportFlatMapTransform
         implements SupportRowLevelErrorClassifier<SeaTunnelRow> {
+    private static final long serialVersionUID = 5502594799389514109L;
+
     public static final String PLUGIN_NAME = "Sql";
 
     public static final Option<String> KEY_QUERY =

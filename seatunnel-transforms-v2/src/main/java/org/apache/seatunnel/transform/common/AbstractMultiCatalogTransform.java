@@ -147,7 +147,7 @@ public abstract class AbstractMultiCatalogTransform implements SeaTunnelTransfor
      * <p>Never {@code null}; an empty config is returned when no env was supplied.
      */
     protected ReadonlyConfig getEnvOptions() {
-        return envOptions;
+        return envOptions == null ? ReadonlyConfig.fromMap(Collections.emptyMap()) : envOptions;
     }
 
     private void rejectDuplicateTablePaths(List<ReadonlyConfig> tableConfigs) {
