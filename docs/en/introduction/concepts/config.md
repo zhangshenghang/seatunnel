@@ -82,24 +82,23 @@ The most common `env` parameters are:
 
 For the full parameter list, engine-specific prefixes, and more examples, see [JobEnvConfig](../configuration/JobEnvConfig.md).
 
-#### Custom parameters for plugins and UDFs
+#### Job-scoped variables for plugins and UDFs
 
-Use `env.custom_parameters` to define job-scoped key/value pairs that plugins and SQL UDFs can read without repeating them in every plugin block:
+The **entire** `env` block is passed to plugin factories and UDFs, not only `custom_parameters`. Any top-level key can be read; nested blocks such as `custom_parameters` remain available when you want to group related values:
 
 ```hocon
 env {
   job.mode = "BATCH"
-  custom_parameters {
-    my_key = "my_value"
-  }
+  my_key = "my_value"
 }
 ```
 
 On the Zeta engine:
 
-- A `TableSourceFactory`, `TableSinkFactory`, or `TableTransformFactory` implementation can read them from `context.getEnvOptions()`, for example `context.getEnvOptions().get(EnvCommonOptions.CUSTOM_PARAMETERS).get("my_key")`.
-- A custom `ZetaUDF` used by the `Sql` transform can override `open(ReadonlyConfig envOptions)` and keep the value in an instance field. The existing `open()` behavior is unchanged.
+- A `TableSourceFactory`, `TableSinkFactory`, `MultiTableSinkFactory` or `TableTransformFactory` implementation can read every env key from `context.getEnvOptions()`, for example `context.getEnvOptions().get(Options.key("my_key").stringType())`.
+- A custom `ZetaUDF` used by the `Sql` transform receives the whole env through `open(ReadonlyConfig envOptions)`; read any key from it and keep the value in an instance field. The existing `open()` behavior is unchanged.
 - A custom `CalciteUdf` used by the `Calcite` transform can read `CalciteUdfContext.current().getEnvOptions()` inside its static `eval` method. Calcite invokes UDFs statically, so do not store job-scoped values in static fields.
+- `env` is an open map: user-defined keys are allowed in addition to the engine's declared options.
 
 Limitations:
 

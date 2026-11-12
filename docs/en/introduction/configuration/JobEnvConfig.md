@@ -39,20 +39,18 @@ Specify the method of encryption, if you didn't have the requirement for encrypt
 
 For more details, you can refer to the documentation [Config Encryption Decryption](./config-encryption-decryption.md)
 
-### custom_parameters
+### User-defined variables
 
-Job-scoped custom key/value pairs for plugins and SQL UDFs:
+The entire `env` block is available to plugin factories and UDFs, including user-defined top-level keys:
 
 ```hocon
 env {
   job.mode = "BATCH"
-  custom_parameters {
-    my_key = "my_value"
-  }
+  my_key = "my_value"
 }
 ```
 
-On Zeta, plugin factories can read them from `TableFactoryContext#getEnvOptions()`, `ZetaUDF` implementations receive them through `open(ReadonlyConfig envOptions)`, and `CalciteUdf` implementations can read `CalciteUdfContext.current().getEnvOptions()` inside their static `eval` method. See [Intro To Config File](../concepts/config.md#custom-parameters-for-plugins-and-udfs) for details and limitations.
+Nested blocks such as `custom_parameters` are also passed through. On Zeta, plugin factories can read every key from `TableFactoryContext#getEnvOptions()`, `ZetaUDF` implementations receive the whole env through `open(ReadonlyConfig envOptions)`, and `CalciteUdf` implementations can read `CalciteUdfContext.current().getEnvOptions()` inside their static `eval` method. See [Intro To Config File](../concepts/config.md#job-scoped-variables-for-plugins-and-udfs) for details and limitations.
 
 ## Zeta Engine Parameter
 

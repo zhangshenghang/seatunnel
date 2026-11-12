@@ -17,18 +17,16 @@
 
 package org.apache.seatunnel.e2e.transform.udf;
 
+import org.apache.seatunnel.api.configuration.Options;
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
-import org.apache.seatunnel.api.options.EnvCommonOptions;
 import org.apache.seatunnel.transform.calcite.udf.CalciteUdf;
 import org.apache.seatunnel.transform.calcite.udf.CalciteUdfContext;
 
 import com.google.auto.service.AutoService;
 
-import java.util.Map;
-
 /**
- * E2E Calcite UDF that reads {@code env.custom_parameters.probe} from the per-row context inside
- * its static {@code eval} method.
+ * E2E Calcite UDF that reads the top-level {@code env.probe} from the per-row context inside its
+ * static {@code eval} method.
  */
 @AutoService(CalciteUdf.class)
 public class CalciteEnvProbeUdf implements CalciteUdf {
@@ -44,11 +42,10 @@ public class CalciteEnvProbeUdf implements CalciteUdf {
         CalciteUdfContext context = CalciteUdfContext.current();
         String envValue = null;
         if (context != null) {
-            Map<String, String> customParameters =
+            envValue =
                     context.getEnvOptions()
-                            .getOptional(EnvCommonOptions.CUSTOM_PARAMETERS)
+                            .getOptional(Options.key("probe").stringType().noDefaultValue())
                             .orElse(null);
-            envValue = customParameters == null ? null : customParameters.get("probe");
         }
         return envValue + ":" + value;
     }

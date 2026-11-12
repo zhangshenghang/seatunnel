@@ -17,14 +17,12 @@
 
 package org.apache.seatunnel.engine.client;
 
+import org.apache.seatunnel.api.configuration.Options;
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
-import org.apache.seatunnel.api.options.EnvCommonOptions;
 import org.apache.seatunnel.transform.calcite.udf.CalciteUdf;
 import org.apache.seatunnel.transform.calcite.udf.CalciteUdfContext;
 
 import com.google.auto.service.AutoService;
-
-import java.util.Map;
 
 /** Test-only Calcite UDF used to verify env propagation through the job config parser. */
 @AutoService(CalciteUdf.class)
@@ -41,11 +39,10 @@ public class ParserCalciteEnvProbeUdf implements CalciteUdf {
         CalciteUdfContext context = CalciteUdfContext.current();
         String envValue = null;
         if (context != null) {
-            Map<String, String> customParameters =
+            envValue =
                     context.getEnvOptions()
-                            .getOptional(EnvCommonOptions.CUSTOM_PARAMETERS)
+                            .getOptional(Options.key("probe").stringType().noDefaultValue())
                             .orElse(null);
-            envValue = customParameters == null ? null : customParameters.get("probe");
         }
         return envValue + ":" + value;
     }

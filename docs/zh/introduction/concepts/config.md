@@ -82,24 +82,23 @@ sink {
 
 如果您想查看完整参数列表、引擎专属前缀和更多示例，请继续阅读 [JobEnvConfig](../configuration/JobEnvConfig.md)。
 
-#### 供插件与 UDF 使用的自定义参数
+#### 供插件与 UDF 使用的作业级变量
 
-`env.custom_parameters` 用于定义作业级键值对，插件和 SQL UDF 可以直接读取，无需在每个插件块中重复配置：
+**整个 `env` 块**都会传递给插件工厂和 UDF，不只是 `custom_parameters`。任意顶层 key 都可以读取；需要分组时也可以继续使用 `custom_parameters` 等嵌套结构：
 
 ```hocon
 env {
   job.mode = "BATCH"
-  custom_parameters {
-    my_key = "my_value"
-  }
+  my_key = "my_value"
 }
 ```
 
 在 Zeta 引擎中：
 
-- `TableSourceFactory`、`TableSinkFactory`、`TableTransformFactory` 的实现可以通过 `context.getEnvOptions()` 读取，例如 `context.getEnvOptions().get(EnvCommonOptions.CUSTOM_PARAMETERS).get("my_key")`。
-- `Sql` transform 使用的自定义 `ZetaUDF` 可以重写 `open(ReadonlyConfig envOptions)`，把参数保存到实例字段中；原有的 `open()` 行为保持不变。
+- `TableSourceFactory`、`TableSinkFactory`、`MultiTableSinkFactory`、`TableTransformFactory` 的实现可以通过 `context.getEnvOptions()` 读取所有 env key，例如 `context.getEnvOptions().get(Options.key("my_key").stringType())`。
+- `Sql` transform 使用的自定义 `ZetaUDF` 通过 `open(ReadonlyConfig envOptions)` 接收整个 env；可以读取任意 key 并保存到实例字段中，原有的 `open()` 行为保持不变。
 - `Calcite` transform 使用的自定义 `CalciteUdf` 可以在静态 `eval` 方法中通过 `CalciteUdfContext.current().getEnvOptions()` 读取。Calcite 以静态方式调用 UDF，因此不要把作业级参数保存到静态字段中。
+- `env` 是开放 map：除了引擎已声明的选项外，允许用户自定义 key。
 
 限制说明：
 

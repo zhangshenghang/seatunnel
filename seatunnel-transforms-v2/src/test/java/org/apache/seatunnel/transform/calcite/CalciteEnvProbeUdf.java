@@ -17,14 +17,12 @@
 
 package org.apache.seatunnel.transform.calcite;
 
+import org.apache.seatunnel.api.configuration.Options;
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
-import org.apache.seatunnel.api.options.EnvCommonOptions;
 import org.apache.seatunnel.transform.calcite.udf.CalciteUdf;
 import org.apache.seatunnel.transform.calcite.udf.CalciteUdfContext;
 
 import com.google.auto.service.AutoService;
-
-import java.util.Map;
 
 /**
  * Test-only Calcite UDF that captures the env options passed to {@link
@@ -69,8 +67,8 @@ public class CalciteEnvProbeUdf implements CalciteUdf {
     }
 
     private static String probeValue(ReadonlyConfig envOptions) {
-        Map<String, String> customParameters =
-                envOptions.getOptional(EnvCommonOptions.CUSTOM_PARAMETERS).orElse(null);
-        return customParameters == null ? null : customParameters.get("probe");
+        return envOptions
+                .getOptional(Options.key("probe").stringType().noDefaultValue())
+                .orElse(null);
     }
 }

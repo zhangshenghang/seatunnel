@@ -161,10 +161,8 @@ public class CalciteUdfEnvOptionsTest {
     }
 
     private static ReadonlyConfig envOptions(String probe) {
-        Map<String, Object> customParameters = new HashMap<>();
-        customParameters.put("probe", probe);
         Map<String, Object> env = new HashMap<>();
-        env.put("custom_parameters", customParameters);
+        env.put("probe", probe);
         return ReadonlyConfig.fromMap(env);
     }
 }

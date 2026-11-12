@@ -17,8 +17,8 @@
 
 package org.apache.seatunnel.e2e.transform.udf;
 
+import org.apache.seatunnel.api.configuration.Options;
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
-import org.apache.seatunnel.api.options.EnvCommonOptions;
 import org.apache.seatunnel.api.table.type.BasicType;
 import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
 import org.apache.seatunnel.transform.sql.zeta.ZetaUDF;
@@ -26,10 +26,9 @@ import org.apache.seatunnel.transform.sql.zeta.ZetaUDF;
 import com.google.auto.service.AutoService;
 
 import java.util.List;
-import java.util.Map;
 
 /**
- * E2E UDF that reads a value from {@code env.custom_parameters.probe} in {@link
+ * E2E UDF that reads a value from the top-level {@code env.probe} in {@link
  * ZetaUDF#open(ReadonlyConfig)} and prefixes every evaluated value with it.
  */
 @AutoService(ZetaUDF.class)
@@ -51,9 +50,10 @@ public class EnvProbeUdf implements ZetaUDF {
 
     @Override
     public void open(ReadonlyConfig envOptions) {
-        Map<String, String> customParameters =
-                envOptions.getOptional(EnvCommonOptions.CUSTOM_PARAMETERS).orElse(null);
-        envValue = customParameters == null ? null : customParameters.get("probe");
+        envValue =
+                envOptions
+                        .getOptional(Options.key("probe").stringType().noDefaultValue())
+                        .orElse(null);
     }
 
     @Override

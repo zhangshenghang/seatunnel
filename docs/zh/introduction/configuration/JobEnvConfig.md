@@ -39,20 +39,18 @@
 
 更多详细信息，您可以参考文档 [Config Encryption Decryption](./config-encryption-decryption.md)
 
-### custom_parameters
+### 用户自定义变量
 
-供插件和 SQL UDF 使用的作业级自定义键值对：
+整个 `env` 块都会提供给插件工厂和 UDF，包括用户自定义的顶层 key：
 
 ```hocon
 env {
   job.mode = "BATCH"
-  custom_parameters {
-    my_key = "my_value"
-  }
+  my_key = "my_value"
 }
 ```
 
-在 Zeta 引擎中，插件工厂可通过 `TableFactoryContext#getEnvOptions()` 读取；`ZetaUDF` 实现通过 `open(ReadonlyConfig envOptions)` 接收；`CalciteUdf` 实现可在静态 `eval` 方法中通过 `CalciteUdfContext.current().getEnvOptions()` 读取。详细说明与限制请参考 [配置文件入门](../concepts/config.md#供插件与-udf-使用的自定义参数)。
+`custom_parameters` 等嵌套结构也会原样传递。在 Zeta 引擎中，插件工厂可通过 `TableFactoryContext#getEnvOptions()` 读取所有 key；`ZetaUDF` 实现通过 `open(ReadonlyConfig envOptions)` 接收整个 env；`CalciteUdf` 实现可在静态 `eval` 方法中通过 `CalciteUdfContext.current().getEnvOptions()` 读取。详细说明与限制请参考 [配置文件入门](../concepts/config.md#供插件与-udf-使用的作业级变量)。
 
 ## Zeta 引擎参数
 

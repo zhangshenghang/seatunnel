@@ -17,8 +17,8 @@
 
 package org.apache.seatunnel.engine.client;
 
+import org.apache.seatunnel.api.configuration.Options;
 import org.apache.seatunnel.api.configuration.ReadonlyConfig;
-import org.apache.seatunnel.api.options.EnvCommonOptions;
 import org.apache.seatunnel.api.table.type.BasicType;
 import org.apache.seatunnel.api.table.type.SeaTunnelDataType;
 import org.apache.seatunnel.transform.sql.zeta.ZetaUDF;
@@ -26,7 +26,6 @@ import org.apache.seatunnel.transform.sql.zeta.ZetaUDF;
 import com.google.auto.service.AutoService;
 
 import java.util.List;
-import java.util.Map;
 
 /** Test-only UDF used to verify env propagation through the job config parser. */
 @AutoService(ZetaUDF.class)
@@ -58,9 +57,10 @@ public class ParserEnvProbeUdf implements ZetaUDF {
 
     @Override
     public void open(ReadonlyConfig envOptions) {
-        Map<String, String> customParameters =
-                envOptions.getOptional(EnvCommonOptions.CUSTOM_PARAMETERS).orElse(null);
-        envValue = customParameters == null ? null : customParameters.get("probe");
+        envValue =
+                envOptions
+                        .getOptional(Options.key("probe").stringType().noDefaultValue())
+                        .orElse(null);
         lastOpenedEnvValue = envValue;
     }
 
