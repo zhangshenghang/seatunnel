@@ -38,6 +38,7 @@ import org.apache.seatunnel.engine.server.execution.ExecutionState;
 import org.apache.seatunnel.engine.server.master.JobMaster;
 
 import org.awaitility.Awaitility;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -46,10 +47,14 @@ import com.hazelcast.instance.impl.HazelcastInstanceImpl;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 /**
@@ -84,13 +89,12 @@ import java.util.stream.Stream;
  * handled explicitly would be revived instead of finishing its cancellation.
  *
  * <p>The CANCELING window is short (milliseconds to a couple of seconds), so this test tight-polls
- * the active master's own in-JVM job status (a plain in-memory read, no network round trip) and
- * terminates the master the instant CANCELING is observed. Because the state transition is gated by
- * real IMap writes and cancellation RPCs while the poll loop is not, the sample rate is orders of
- * magnitude higher than the window it races against. If an attempt still loses the race (the cancel
- * completed before the kill), the test retries the whole scenario on the same cluster instead of
- * failing on timing; only an attempt that provably crashed the master mid-cancel is used for the
- * assertions.
+ * the active master's job status and terminates the master the instant CANCELING is observed. The
+ * status is read through the distributed job-state IMap even when the polled coordinator is local,
+ * so a single sample is a round trip and the loop's high sampling rate is not a guarantee that
+ * every attempt catches the window. If an attempt loses the race (the cancel completed before the
+ * kill), the test retries the whole scenario on the same cluster instead of failing on timing; only
+ * an attempt that provably crashed the master mid-cancel is used for the assertions.
  */
 @Slf4j
 public class CancelDuringMasterFailoverIT {
@@ -102,7 +106,18 @@ public class CancelDuringMasterFailoverIT {
 
     private static final long CLUSTER_FORMATION_TIMEOUT_SECONDS = 30;
     private static final long JOB_STATE_TIMEOUT_SECONDS = 180;
+    private static final long TAKEOVER_TIMEOUT_SECONDS = 60;
+    private static final long CANCEL_OBSERVER_TIMEOUT_SECONDS = 60;
     private static final int MAX_CANCEL_RACE_ATTEMPTS = 5;
+
+    /**
+     * Hold key whose close gate is armed for the current attempt. The test thread owns the key so
+     * that teardown can always release and unregister it, including on {@link AssertionError}.
+     */
+    private String armedHoldKey;
+
+    /** Test-owned cancel requests, joined during teardown instead of being left behind. */
+    private final List<CompletableFuture<Void>> cancelObservers = new ArrayList<>();
 
     @Test
     public void testCancelRequestedBeforeMasterFailoverIsNotLost() throws Exception {
@@ -167,22 +182,47 @@ public class CancelDuringMasterFailoverIT {
             // Wait until the promoted master has taken over the persisted job (it owns a restored
             // JobMaster or the job is already terminal). Releasing the held writer before that
             // would let the old task's last status report race the restore, which is a different
-            // scenario than the one under test.
-            long takeoverDeadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(60);
-            while (System.currentTimeMillis() < takeoverDeadline) {
-                JobStatus status = standbyCoordinatorService.getJobStatus(jobId);
-                if (status != null && status.isEndState()) {
-                    break;
-                }
-                if (getJobMaster(standbyMaster, jobId) != null) {
-                    break;
-                }
-                TimeUnit.MILLISECONDS.sleep(10);
+            // scenario than the one under test, so a takeover that is not observed within the
+            // budget fails the test instead of silently changing the schedule.
+            AtomicReference<JobStatus> lastStatus = new AtomicReference<>();
+            AtomicReference<Boolean> successorJobMasterSeen = new AtomicReference<>(false);
+            try {
+                Awaitility.await()
+                        .atMost(TAKEOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                        .pollInterval(10, TimeUnit.MILLISECONDS)
+                        .ignoreExceptions()
+                        .until(
+                                () -> {
+                                    JobStatus status =
+                                            standbyCoordinatorService.getJobStatus(jobId);
+                                    lastStatus.set(status);
+                                    if (status != null && status.isEndState()) {
+                                        return true;
+                                    }
+                                    boolean jobMasterPresent =
+                                            getJobMaster(standbyMaster, jobId) != null;
+                                    successorJobMasterSeen.set(jobMasterPresent);
+                                    return jobMasterPresent;
+                                });
+            } catch (ConditionTimeoutException e) {
+                Assertions.fail(
+                        "The promoted master did not take over job "
+                                + jobId
+                                + " within "
+                                + TAKEOVER_TIMEOUT_SECONDS
+                                + "s (last observed status: "
+                                + lastStatus.get()
+                                + ", successor job master observed: "
+                                + successorJobMasterSeen.get()
+                                + "); refusing to release the held writer without an observed"
+                                + " takeover",
+                        e);
             }
 
             // Let the worker finish closing its writer; the new master must then drive the still
-            // persisted cancellation to its terminal state.
-            FinalCheckpointCloseHoldGate.release(cancelledAttempt.holdKey);
+            // persisted cancellation to its terminal state. Clearing, rather than only releasing,
+            // removes the registry entry as soon as the transferred key has served its purpose.
+            releaseArmedHoldGate();
 
             Awaitility.await()
                     .atMost(120, TimeUnit.SECONDS)
@@ -210,19 +250,37 @@ public class CancelDuringMasterFailoverIT {
                                         JobStatus.CANCELED, jobProxyAfterFailover.getJobStatus());
                             });
         } finally {
-            if (engineClient != null) {
-                engineClient.close();
+            // Never let a failure path strand a task inside the interrupt-resistant close gate:
+            // clear it before the client or any member is torn down, no matter where the test
+            // failed (AssertionError included).
+            releaseArmedHoldGate();
+            awaitCancelObservers();
+            try {
+                if (engineClient != null) {
+                    engineClient.close();
+                }
+            } finally {
+                try {
+                    if (workerNode != null && workerNode.getLifecycleService().isRunning()) {
+                        workerNode.shutdown();
+                    }
+                } finally {
+                    try {
+                        if (masterNode2 != null && masterNode2.getLifecycleService().isRunning()) {
+                            masterNode2.shutdown();
+                        }
+                    } finally {
+                        try {
+                            if (masterNode1 != null
+                                    && masterNode1.getLifecycleService().isRunning()) {
+                                masterNode1.shutdown();
+                            }
+                        } finally {
+                            FileUtils.deleteFile(outputPath);
+                        }
+                    }
+                }
             }
-            if (workerNode != null && workerNode.getLifecycleService().isRunning()) {
-                workerNode.shutdown();
-            }
-            if (masterNode2 != null && masterNode2.getLifecycleService().isRunning()) {
-                masterNode2.shutdown();
-            }
-            if (masterNode1 != null && masterNode1.getLifecycleService().isRunning()) {
-                masterNode1.shutdown();
-            }
-            FileUtils.deleteFile(outputPath);
         }
     }
 
@@ -232,9 +290,9 @@ public class CancelDuringMasterFailoverIT {
      * and completes first, the attempt is thrown away (gate released, job terminal) and retried,
      * because only a kill that provably landed inside the cancellation window is meaningful here.
      *
-     * @return the job id and hold key of the attempt whose master was killed mid-cancel
+     * @return the job id of the attempt whose master was killed mid-cancel
      */
-    private static CancelledAttempt cancelWhileCrashingMaster(
+    private CancelledAttempt cancelWhileCrashingMaster(
             SeaTunnelClient engineClient,
             HazelcastInstanceImpl activeMaster,
             SeaTunnelConfig jobConfigSource,
@@ -244,8 +302,9 @@ public class CancelDuringMasterFailoverIT {
         for (int attempt = 1; attempt <= MAX_CANCEL_RACE_ATTEMPTS; attempt++) {
             String holdKey = testCaseName + "_attempt_" + attempt + "_" + System.nanoTime();
             String jobConfigFile = createJobConfigFile(testCaseName, attempt, holdKey, outputPath);
-            FinalCheckpointCloseHoldGate.arm(holdKey);
+            armHoldGate(holdKey);
             ClientJobProxy jobProxy = null;
+            boolean handedToTestOwner = false;
             try {
                 JobConfig jobConfig = new JobConfig();
                 jobConfig.setName(testCaseName + "_attempt_" + attempt);
@@ -267,17 +326,19 @@ public class CancelDuringMasterFailoverIT {
                 assertAllVerticesRunning(activeMaster, jobId, 60);
 
                 ClientJobProxy finalCancelProxy = jobProxy;
-                CompletableFuture.runAsync(
-                        () -> {
-                            try {
-                                finalCancelProxy.cancelJob();
-                            } catch (Throwable t) {
-                                log.info(
-                                        "cancelJob() did not return cleanly after the active "
-                                                + "master was killed",
-                                        t);
-                            }
-                        });
+                CompletableFuture<Void> cancelObserver =
+                        CompletableFuture.runAsync(
+                                () -> {
+                                    try {
+                                        finalCancelProxy.cancelJob();
+                                    } catch (Throwable t) {
+                                        log.info(
+                                                "cancelJob() did not return cleanly after the "
+                                                        + "active master was killed",
+                                                t);
+                                    }
+                                });
+                cancelObservers.add(cancelObserver);
 
                 CoordinatorService activeCoordinatorService = getCoordinatorService(activeMaster);
                 boolean observedCanceling = false;
@@ -300,7 +361,8 @@ public class CancelDuringMasterFailoverIT {
                                     + "retrying",
                             attempt);
                     // Release the held writer so the attempt can reach its terminal state and
-                    // free the worker slots before the next attempt submits a new job.
+                    // free the worker slots before the next attempt submits a new job. The
+                    // finally block unregisters the key once the attempt is abandoned.
                     FinalCheckpointCloseHoldGate.release(holdKey);
                     CoordinatorService coordinatorService = getCoordinatorService(activeMaster);
                     Awaitility.await()
@@ -311,16 +373,15 @@ public class CancelDuringMasterFailoverIT {
                                                     coordinatorService
                                                             .getJobStatus(jobId)
                                                             .isEndState()));
-                    FinalCheckpointCloseHoldGate.clear(holdKey);
                     continue;
                 }
 
                 // Crash the master inside the cancellation window: terminate() does not give the
                 // coordinator a chance to finish the in-flight cancel before the node goes away.
                 activeMaster.getLifecycleService().terminate();
-                return new CancelledAttempt(jobId, holdKey);
+                handedToTestOwner = true;
+                return new CancelledAttempt(jobId);
             } catch (Exception e) {
-                FinalCheckpointCloseHoldGate.clear(holdKey);
                 if (jobProxy != null) {
                     try {
                         jobProxy.cancelJob();
@@ -329,6 +390,12 @@ public class CancelDuringMasterFailoverIT {
                     }
                 }
                 throw e;
+            } finally {
+                if (!handedToTestOwner) {
+                    // Covers AssertionError as well as checked failures: never leave an armed,
+                    // interrupt-resistant gate behind for a retry or for teardown.
+                    releaseArmedHoldGate();
+                }
             }
         }
         throw new AssertionError(
@@ -336,6 +403,57 @@ public class CancelDuringMasterFailoverIT {
                         + "it could be killed in all "
                         + MAX_CANCEL_RACE_ATTEMPTS
                         + " attempts");
+    }
+
+    /** Arms the close gate and records the key as owned by the test thread. */
+    private void armHoldGate(String holdKey) {
+        FinalCheckpointCloseHoldGate.arm(holdKey);
+        armedHoldKey = holdKey;
+    }
+
+    /**
+     * Releases and unregisters the currently armed gate, if any. Safe to call more than once and
+     * from failure teardown, where clearing must happen before any client or member is closed.
+     */
+    private void releaseArmedHoldGate() {
+        String holdKey = armedHoldKey;
+        armedHoldKey = null;
+        if (holdKey != null) {
+            FinalCheckpointCloseHoldGate.clear(holdKey);
+        }
+    }
+
+    /**
+     * Waits, within one bounded budget, for the test-owned cancel requests to finish so that no
+     * test work outlives teardown. The observers catch their own failures, so a leftover observer
+     * is only reported, never allowed to fail an already failing test.
+     */
+    private void awaitCancelObservers() {
+        long deadlineNanos =
+                System.nanoTime() + TimeUnit.SECONDS.toNanos(CANCEL_OBSERVER_TIMEOUT_SECONDS);
+        for (CompletableFuture<Void> cancelObserver : cancelObservers) {
+            long remainingNanos = deadlineNanos - System.nanoTime();
+            if (remainingNanos <= 0) {
+                log.warn(
+                        "Gave up waiting for {} test-owned cancel observer(s) to finish",
+                        cancelObservers.size());
+                return;
+            }
+            try {
+                cancelObserver.get(remainingNanos, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Interrupted while waiting for a test-owned cancel observer", e);
+                return;
+            } catch (TimeoutException e) {
+                log.warn(
+                        "A test-owned cancel observer did not finish within {} s, continuing "
+                                + "teardown",
+                        CANCEL_OBSERVER_TIMEOUT_SECONDS);
+            } catch (Exception e) {
+                log.warn("A test-owned cancel observer failed during teardown", e);
+            }
+        }
     }
 
     private static void assertAllVerticesRunning(
@@ -439,14 +557,12 @@ public class CancelDuringMasterFailoverIT {
         return getCoordinatorService(node).getJobMaster(jobId);
     }
 
-    /** Job id and gate key of the attempt whose active master was killed mid-cancel. */
+    /** Job id of the attempt whose active master was killed mid-cancel. */
     private static final class CancelledAttempt {
         private final long jobId;
-        private final String holdKey;
 
-        private CancelledAttempt(long jobId, String holdKey) {
+        private CancelledAttempt(long jobId) {
             this.jobId = jobId;
-            this.holdKey = holdKey;
         }
     }
 }
