@@ -1095,6 +1095,108 @@ public class CheckpointCoordinatorTest
         }
     }
 
+    /**
+     * A final checkpoint must not count as a cleanly completed pipeline while its completion
+     * notification is still pending: that notification can still fail and turn the coordinator
+     * {@code FAILED}, and a sibling savepoint that treats the pipeline as satisfied would report
+     * success for a pipeline that ends up failed. Only the successful end of the finalization
+     * publishes the clean outcome.
+     */
+    @Test
+    void testCleanlyCompletedRequiresSuccessfulFinalNotification() throws Exception {
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        try {
+            CheckpointCoordinator spy = Mockito.spy(buildMinimalCoordinator(executorService));
+            CountDownLatch notificationStarted = new CountDownLatch(1);
+            CountDownLatch releaseNotification = new CountDownLatch(1);
+            Mockito.doAnswer(
+                            invocation -> {
+                                notificationStarted.countDown();
+                                releaseNotification.await(30, TimeUnit.SECONDS);
+                                throw new IllegalStateException("worker lost");
+                            })
+                    .when(spy)
+                    .notifyCheckpointCompleted(Mockito.any());
+
+            CompletedCheckpoint finalCheckpoint =
+                    new CompletedCheckpoint(
+                            1L,
+                            1,
+                            2L,
+                            System.currentTimeMillis(),
+                            CheckpointType.COMPLETED_POINT_TYPE,
+                            System.currentTimeMillis(),
+                            new HashMap<>(),
+                            new HashMap<>());
+            Future<?> finalization =
+                    executorService.submit(() -> spy.completePendingCheckpoint(finalCheckpoint));
+
+            Assertions.assertTrue(
+                    notificationStarted.await(30, TimeUnit.SECONDS),
+                    "the final checkpoint must reach its completion notification");
+            Assertions.assertTrue(
+                    spy.isCompleted(),
+                    "the final checkpoint object is already published before its notification");
+            Assertions.assertFalse(
+                    spy.isCleanlyCompleted(),
+                    "a pipeline whose final notification is still pending must not be skipped by a "
+                            + "sibling savepoint");
+
+            releaseNotification.countDown();
+            finalization.get(30, TimeUnit.SECONDS);
+
+            Assertions.assertFalse(
+                    spy.isCleanlyCompleted(),
+                    "a pipeline whose final notification failed must not count as cleanly "
+                            + "completed");
+            Assertions.assertEquals(
+                    CheckpointCoordinatorStatus.FAILED,
+                    spy.waitCheckpointCoordinatorComplete().get().getCheckpointCoordinatorStatus(),
+                    "the held notification failure must fail the coordinator, not report success");
+        } finally {
+            executorService.shutdownNow();
+        }
+    }
+
+    /** Control for {@link #testCleanlyCompletedRequiresSuccessfulFinalNotification()}. */
+    @Test
+    void testCleanlyCompletedAfterSuccessfulFinalNotification() throws Exception {
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        try {
+            CheckpointCoordinator spy = Mockito.spy(buildMinimalCoordinator(executorService));
+            // The minimal plan has one subtask but no worker transport: acknowledge the final
+            // checkpoint locally so the real notification path succeeds.
+            Mockito.doReturn(new InvocationFuture<?>[0])
+                    .when(spy)
+                    .notifyCheckpointCompleted(Mockito.any());
+
+            CompletedCheckpoint finalCheckpoint =
+                    new CompletedCheckpoint(
+                            1L,
+                            1,
+                            2L,
+                            System.currentTimeMillis(),
+                            CheckpointType.COMPLETED_POINT_TYPE,
+                            System.currentTimeMillis(),
+                            new HashMap<>(),
+                            new HashMap<>());
+            spy.completePendingCheckpoint(finalCheckpoint);
+
+            Assertions.assertTrue(
+                    spy.isCompleted(), "the final checkpoint must end the coordinator");
+            Assertions.assertTrue(
+                    spy.isCleanlyCompleted(),
+                    "a pipeline that finished its final checkpoint cleanly may be skipped by a "
+                            + "sibling savepoint");
+            Assertions.assertEquals(
+                    CheckpointCoordinatorStatus.FINISHED,
+                    spy.waitCheckpointCoordinatorComplete().get().getCheckpointCoordinatorStatus(),
+                    "a clean completion must publish the FINISHED terminal state");
+        } finally {
+            executorService.shutdownNow();
+        }
+    }
+
     @Test
     void testDuplicateSchemaChangeAfterCheckpointCompletionIsIgnored() {
         ExecutorService executorService = Executors.newCachedThreadPool();

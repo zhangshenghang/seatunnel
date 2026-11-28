@@ -162,6 +162,19 @@ public class CheckpointCoordinator {
 
     private volatile CompletedCheckpoint latestCompletedCheckpoint = null;
 
+    /**
+     * Whether this pipeline ended cleanly, i.e. its final checkpoint was persisted, notified to
+     * every task and the coordinator reached its terminal {@code FINISHED}/{@code SUSPEND} outcome.
+     *
+     * <p>Reading {@code latestCompletedCheckpoint} alone is not enough: {@link
+     * #completePendingCheckpoint(CompletedCheckpoint)} publishes it before the completion
+     * notification and before the terminal status, and that notification can still fail and turn
+     * the coordinator {@code FAILED}. The persisted coordinator status cannot carry this either,
+     * because it is retired with the job state maps and is not written for a freshly submitted job.
+     * Only the successful end of the finalization sets this flag.
+     */
+    private volatile boolean cleanlyCompleted = false;
+
     private final CheckpointConfig coordinatorConfig;
 
     private transient ScheduledExecutorService scheduler;
@@ -727,6 +740,7 @@ public class CheckpointCoordinator {
         LOG.info("received restore CheckpointCoordinator with alreadyStarted: {}", alreadyStarted);
         errorByPhysicalVertex = new AtomicReference<>();
         checkpointCoordinatorFuture = new CompletableFuture<>();
+        cleanlyCompleted = false;
         updateStatus(CheckpointCoordinatorStatus.RUNNING);
 
         Set<TaskLocation> restoredReadyToClose = loadReadyToCloseStartingTask();
@@ -1499,6 +1513,10 @@ public class CheckpointCoordinator {
                 checkpointCoordinatorFuture.complete(
                         new CheckpointCoordinatorState(CheckpointCoordinatorStatus.FINISHED, null));
             }
+            // Publish the clean outcome only after the notification and the terminal transition
+            // succeeded, so a savepoint of a sibling pipeline never treats a pipeline that can
+            // still turn FAILED as satisfied.
+            cleanlyCompleted = true;
         }
     }
 
@@ -1551,25 +1569,30 @@ public class CheckpointCoordinator {
     /**
      * Whether this pipeline ended cleanly, so a savepoint request of the job may skip it.
      *
-     * <p>Only a pipeline that completed successfully ever records a completed point or a savepoint
-     * as its last completed checkpoint; a failed or cancelled pipeline keeps an earlier, non-final
-     * checkpoint. The persisted coordinator status is normally retired ({@code checkpoint_state_*}
-     * removed) by the time a sibling pipeline requests a savepoint, so it cannot be the primary
-     * signal; when it is still readable, a failed or cancelled status still vetoes the skip.
+     * <p>Only a pipeline whose final checkpoint was persisted, notified and turned into a terminal
+     * {@code FINISHED}/{@code SUSPEND} outcome counts. A pipeline that is still inside the
+     * completion-notification window, or that failed or was cancelled, does not: it still has to
+     * take part in the savepoint so the request is reported as failed instead of silently
+     * succeeding.
      */
     public boolean isCleanlyCompleted() {
-        if (latestCompletedCheckpoint == null || latestCompletedCheckpoint.isRestored()) {
+        if (!cleanlyCompleted || latestCompletedCheckpoint == null) {
             return false;
         }
-        CheckpointType checkpointType = latestCompletedCheckpoint.getCheckpointType();
-        if (checkpointType != CheckpointType.COMPLETED_POINT_TYPE
-                && checkpointType != CheckpointType.SAVEPOINT_TYPE) {
-            return false;
-        }
-        CheckpointCoordinatorStatus status =
-                (CheckpointCoordinatorStatus) runningJobStateIMap.get(checkpointStateImapKey);
-        return status != CheckpointCoordinatorStatus.FAILED
-                && status != CheckpointCoordinatorStatus.CANCELED;
+        return latestCompletedCheckpoint.getCheckpointType().isFinalCheckpoint()
+                && !latestCompletedCheckpoint.isRestored();
+    }
+
+    /**
+     * The last fully completed checkpoint of this pipeline, or {@code null} when the pipeline has
+     * not completed one yet.
+     *
+     * <p>The regular finalization deliberately does not write a completed-point checkpoint to
+     * storage. The checkpoint manager keeps this object as the durable completion marker of a
+     * pipeline that a savepoint skips, so a restore can explain its missing savepoint state.
+     */
+    public CompletedCheckpoint getLatestCompletedCheckpoint() {
+        return latestCompletedCheckpoint;
     }
 
     public boolean isEndOfSavePoint() {

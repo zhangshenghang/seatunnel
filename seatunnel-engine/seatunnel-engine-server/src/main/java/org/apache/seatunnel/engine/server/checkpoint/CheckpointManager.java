@@ -17,6 +17,8 @@
 
 package org.apache.seatunnel.engine.server.checkpoint;
 
+import org.apache.seatunnel.shade.com.google.common.annotations.VisibleForTesting;
+
 import org.apache.seatunnel.api.tracing.MDCTracer;
 import org.apache.seatunnel.engine.checkpoint.storage.PipelineState;
 import org.apache.seatunnel.engine.checkpoint.storage.api.CheckpointStorage;
@@ -48,6 +50,7 @@ import org.apache.seatunnel.engine.server.execution.TaskLocation;
 import org.apache.seatunnel.engine.server.master.JobMaster;
 import org.apache.seatunnel.engine.server.task.SourceSplitEnumeratorTask;
 import org.apache.seatunnel.engine.server.task.operation.TaskOperation;
+import org.apache.seatunnel.engine.server.task.record.Barrier;
 import org.apache.seatunnel.engine.server.task.statemachine.SeaTunnelTaskState;
 import org.apache.seatunnel.engine.server.utils.CheckpointRestoreUtils;
 import org.apache.seatunnel.engine.server.utils.NodeEngineUtil;
@@ -104,8 +107,10 @@ public class CheckpointManager {
      *
      * <p>A savepoint only stores state for the pipelines that were still running: the fan-out skips
      * a cleanly completed pipeline, and a failed or cancelled one makes the savepoint fail. A
-     * pipeline of a successfully savepointed job that has no savepoint state therefore finished
-     * cleanly before the savepoint, and the restored job must not run it a second time.
+     * pipeline of a successfully savepointed job that has no savepoint state is therefore only
+     * restored as finished when the savepoint recorded it with the durable completion marker
+     * persisted by {@link #persistCompletedPipelineMarkers(Set)}; without that proof the restore
+     * fails closed instead of running the pipeline again.
      */
     private final Set<Integer> completedPipelineIdsBeforeRestore = ConcurrentHashMap.newKeySet();
 
@@ -213,7 +218,17 @@ public class CheckpointManager {
                                             }
                                             if (pipelineState != null) {
                                                 long checkpointId = pipelineState.getCheckpointId();
-                                                idCounter.setCount(checkpointId + 1);
+                                                // A completed-point checkpoint carries the
+                                                // pre-close
+                                                // barrier id, which is not a counter position. It
+                                                // is
+                                                // the completion marker of a pipeline that already
+                                                // finished, so it must not advance the counter (and
+                                                // must not overflow it).
+                                                if (checkpointId
+                                                        < Barrier.PREPARE_CLOSE_BARRIER_ID) {
+                                                    idCounter.setCount(checkpointId + 1);
+                                                }
                                                 log.info(
                                                         "pipeline({}) restore with {} on checkpointId({})",
                                                         plan.getPipelineId(),
@@ -221,8 +236,25 @@ public class CheckpointManager {
                                                         checkpointId);
                                             } else if (restoreMode == RestoreMode.SAVEPOINT
                                                     && restoreSourceJobId != null) {
-                                                markPipelineCompletedBeforeSavepoint(
-                                                        restoreSourceJobId, plan.getPipelineId());
+                                                // The savepoint holds no state for this pipeline.
+                                                // That
+                                                // is only valid for a pipeline that finished
+                                                // cleanly
+                                                // before the savepoint, which the savepoint fan-out
+                                                // recorded with a durable completion marker.
+                                                // Anything
+                                                // else is unexplained state loss and must not be
+                                                // restored as a fresh pipeline: that would replay
+                                                // data
+                                                // the source job already delivered.
+                                                if (!markPipelineCompletedBeforeSavepoint(
+                                                        restoreSourceJobId, plan.getPipelineId())) {
+                                                    throw new IllegalStateException(
+                                                            String.format(
+                                                                    "Pipeline %s of savepoint source job %s has neither savepoint state nor a completed-before-savepoint marker; refusing to restore it as a new pipeline.",
+                                                                    plan.getPipelineId(),
+                                                                    restoreSourceJobId));
+                                                }
                                             }
                                         }
                                         return new CheckpointCoordinator(
@@ -270,25 +302,29 @@ public class CheckpointManager {
      *
      * <p>The savepoint fan-out skips only cleanly completed pipelines and a failed or cancelled
      * pipeline fails the request, so a successful savepoint has no state for a pipeline that is not
-     * in the savepoint but did finish. Requiring the last checkpoint of that pipeline to be a
-     * completed point keeps a pipeline that never checkpointed out of the decision.
+     * in the savepoint but did finish. The proof is the durable completion marker written by {@link
+     * #persistCompletedPipelineMarkers(Set)}: the pipeline's final completed-point checkpoint. An
+     * absent savepoint state without that marker is not explained and must not be restored.
+     *
+     * @return whether the missing savepoint state is explained by the durable marker
      */
-    private void markPipelineCompletedBeforeSavepoint(Long sourceJobId, int pipelineId)
+    private boolean markPipelineCompletedBeforeSavepoint(Long sourceJobId, int pipelineId)
             throws Exception {
         PipelineState latestCheckpoint =
                 checkpointStorage.getLatestCheckpointByJobIdAndPipelineId(
                         String.valueOf(sourceJobId), String.valueOf(pipelineId));
         if (latestCheckpoint == null) {
-            return;
+            return false;
         }
         if (deserializeCheckpoint(latestCheckpoint).getCheckpointType()
                 != CheckpointType.COMPLETED_POINT_TYPE) {
-            return;
+            return false;
         }
         completedPipelineIdsBeforeRestore.add(pipelineId);
         log.info(
                 "pipeline({}) completed cleanly before the savepoint it is restored from; the restored job will not deploy it again",
                 pipelineId);
+        return true;
     }
 
     /**
@@ -313,7 +349,7 @@ public class CheckpointManager {
      */
     @SuppressWarnings("unchecked")
     public PassiveCompletableFuture<CompletedCheckpoint>[] triggerSavePoints() {
-        return MDCTracer.tracing(savepointCoordinators(coordinatorMap).values().stream().parallel())
+        return MDCTracer.tracing(selectSavepointCoordinators().values().stream().parallel())
                 .map(CheckpointCoordinator::startSavepoint)
                 .toArray(PassiveCompletableFuture[]::new);
     }
@@ -325,19 +361,74 @@ public class CheckpointManager {
     @SuppressWarnings("unchecked")
     public PassiveCompletableFuture<CheckpointCoordinatorState>[]
             triggerSavePointsAndWaitComplete() {
-        // A pipeline can finish while its siblings are still running, which keeps the job
-        // RUNNING. Its coordinator is cleanly completed and rejects startSavepoint() with
-        // CHECKPOINT_COORDINATOR_SHUTDOWN by contract, so it must not take part in the fan-out:
-        // otherwise one cleanly finished pipeline turns a legitimate savepoint of the remaining
-        // pipelines into a job-level failure that force-stops them. A failed or cancelled pipeline
-        // is deliberately not skipped: it still has to make the request fail.
+        return MDCTracer.tracing(selectSavepointCoordinators().values().stream().parallel())
+                .map(CheckpointCoordinator::startSavepointAndWaitComplete)
+                .toArray(PassiveCompletableFuture[]::new);
+    }
+
+    /**
+     * Selects the coordinators that take part in a savepoint request of this job and records the
+     * pipelines the request skips.
+     *
+     * <p>A pipeline can finish while its siblings are still running, which keeps the job RUNNING.
+     * Its coordinator is cleanly completed and rejects {@code startSavepoint()} with {@code
+     * CHECKPOINT_COORDINATOR_SHUTDOWN} by contract, so it must not take part in the fan-out:
+     * otherwise one cleanly finished pipeline turns a legitimate savepoint of the remaining
+     * pipelines into a job-level failure that force-stops them. A failed or cancelled pipeline is
+     * deliberately not skipped: it still has to make the request fail.
+     *
+     * <p>A skipped pipeline has no savepoint state, so its final completed-point checkpoint is
+     * persisted as the durable explanation of that absence. A restore accepts the missing state
+     * only when that proof exists.
+     *
+     * @return the coordinators that have to take part in the request
+     */
+    @VisibleForTesting
+    Map<Integer, CheckpointCoordinator> selectSavepointCoordinators() {
         Map<Integer, CheckpointCoordinator> activeCoordinators = activeCoordinatorsForSavepoint();
         Set<Integer> completedPipelineIds = new HashSet<>(coordinatorMap.keySet());
         completedPipelineIds.removeAll(activeCoordinators.keySet());
         completedPipelineIdsBeforeSavepoint = completedPipelineIds;
-        return MDCTracer.tracing(activeCoordinators.values().stream().parallel())
-                .map(CheckpointCoordinator::startSavepointAndWaitComplete)
-                .toArray(PassiveCompletableFuture[]::new);
+        ExceptionUtil.sneaky(() -> persistCompletedPipelineMarkers(completedPipelineIds));
+        return activeCoordinators;
+    }
+
+    /**
+     * Persists the durable completion proof of the pipelines a savepoint skips.
+     *
+     * <p>The regular checkpoint finalization never writes a completed-point checkpoint, so a
+     * pipeline that finished cleanly has no record explaining why a savepoint does not contain its
+     * state. Writing its final checkpoint under this job makes that explanation durable: {@link
+     * #markPipelineCompletedBeforeSavepoint(Long, int)} accepts the missing savepoint state only
+     * when this proof exists, so a restore never runs such a pipeline again on a guess.
+     *
+     * @param pipelineIds pipelines the savepoint fan-out skips
+     */
+    @VisibleForTesting
+    void persistCompletedPipelineMarkers(Set<Integer> pipelineIds) throws Exception {
+        for (Integer pipelineId : pipelineIds) {
+            CheckpointCoordinator coordinator = coordinatorMap.get(pipelineId);
+            if (coordinator == null) {
+                continue;
+            }
+            CompletedCheckpoint completedCheckpoint = coordinator.getLatestCompletedCheckpoint();
+            if (completedCheckpoint == null
+                    || completedCheckpoint.getCheckpointType()
+                            != CheckpointType.COMPLETED_POINT_TYPE) {
+                continue;
+            }
+            checkpointStorage.storeCheckPoint(
+                    PipelineState.builder()
+                            .jobId(String.valueOf(jobId))
+                            .pipelineId(pipelineId)
+                            .checkpointId(completedCheckpoint.getCheckpointId())
+                            .states(serializer.serialize(completedCheckpoint))
+                            .build());
+            log.info(
+                    "persisted the completion marker of pipeline({}) that finished before this savepoint, job id: {}",
+                    pipelineId,
+                    jobId);
+        }
     }
 
     /**

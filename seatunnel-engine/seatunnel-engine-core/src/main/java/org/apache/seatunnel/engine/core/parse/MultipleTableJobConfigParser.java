@@ -137,9 +137,11 @@ public class MultipleTableJobConfigParser {
      * Savepoint state of the source job, keyed by pipeline id.
      *
      * <p>A savepoint only stores state for the pipelines that were still running when it was taken:
-     * a pipeline that had already completed cleanly has no entry. Such a pipeline is not restored
-     * and is not re-run; keeping the map keyed by pipeline id instead of the source index keeps the
-     * remaining entries aligned with their own source.
+     * a pipeline that had already completed cleanly has no entry. Such a pipeline keeps its actions
+     * in the logical DAG so pipeline ids stay aligned, but it is not restored and is never deployed
+     * again; the engine verifies that the savepoint carries a durable completion proof for it and
+     * fails closed otherwise. Keeping the map keyed by pipeline id instead of the source index
+     * keeps the remaining entries aligned with their own source.
      */
     private final Map<Integer, JobPipelineCheckpointData> pipelineCheckpointByPipelineId;
 
@@ -275,7 +277,8 @@ public class MultipleTableJobConfigParser {
             if (isStartWithSavePoint && !pipelineCheckpointByPipelineId.isEmpty()) {
                 // A savepoint only has state for the pipelines that were still running, so fewer
                 // entries than sources is expected when a sibling pipeline had already completed.
-                // Every entry that is present must still belong to one source of this job.
+                // Every entry that is present must still belong to one source of this job, and the
+                // engine rejects a restore whose missing entries have no durable completion proof.
                 Preconditions.checkState(
                         pipelineCheckpointByPipelineId.keySet().stream()
                                 .allMatch(
