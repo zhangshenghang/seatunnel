@@ -209,6 +209,28 @@ public class CoordinatorService {
             new ConcurrentHashMap<>();
 
     /**
+     * Message used for the RPC future of a submission that this coordinator generation will not
+     * complete, either because the coordinator stepped down before publishing the job or because it
+     * stepped down afterwards.
+     */
+    private static final String SUBMISSION_NOT_COMPLETED_MESSAGE =
+            "The coordinator service is no longer active; the job submission was not completed.";
+
+    /**
+     * Generation of this coordinator's ownership of the active-master role, incremented when the
+     * coordinator is cleared on step-down.
+     *
+     * <p>An admission task runs on the coordinator executor, so it can outlive the generation that
+     * started it: {@code clearCoordinatorService()} does not wait for the admission before
+     * releasing the pending queue. An admission captures the generation when it claims the job id
+     * and uses it to refuse publishing a {@link JobMaster} into a queue that already belongs to
+     * another generation, and to keep the persisted {@link JobInfo} of an admission that has been
+     * published already: the step-down fails only the caller-facing future, while that record is
+     * exactly what the next active master restores the job from.
+     */
+    private final AtomicLong coordinatorGeneration = new AtomicLong();
+
+    /**
      * Test-only gate invoked after the "job already known" check and before the job id is claimed
      * in {@link #submittingJobFutures}.
      *
@@ -1347,17 +1369,21 @@ public class CoordinatorService {
         schedulingJobMasters.forEach(JobMaster::interrupt);
         schedulingJobMasters.clear();
         schedulingPendingJobIds.clear();
-        // Fail the submissions this coordinator generation has accepted but not finished admitting
-        // yet. The executor is interrupted below, so an admission task that is still running will
-        // observe it and stop; a task cancelled before it started would otherwise leave its
-        // in-flight future in the map and make a retry against the next generation wait forever.
+        // Fence the admissions that are still running for this generation before any local state is
+        // released: a task that has not published its JobMaster yet must not publish it into the
+        // queue of the next generation, and a task that published it already must keep the
+        // persisted JobInfo instead of rolling it back (see submitJob).
+        coordinatorGeneration.incrementAndGet();
+        // Fail the submissions this generation accepted but did not finish admitting yet, so their
+        // callers stop waiting on a future this generation will never complete. This is a
+        // response-only failure: it does not cancel the admission task, which may still be
+        // executing, and it does not by itself decide whether the admission is rolled back.
         submittingJobFutures
                 .values()
                 .forEach(
                         future ->
                                 future.completeExceptionally(
-                                        new JobException(
-                                                "The coordinator service is no longer active; the job submission was not completed.")));
+                                        new JobException(SUBMISSION_NOT_COMPLETED_MESSAGE)));
         submittingJobFutures.clear();
         pendingJobQueue.release();
         // interrupt all JobMaster
@@ -1483,6 +1509,10 @@ public class CoordinatorService {
         if (claimGate != null) {
             claimGate.accept(jobId);
         }
+        // Capture the generation that owns this admission before claiming the job id. Everything
+        // this admission publishes or rolls back belongs to that generation; a step-down that
+        // happens later must not be undone by the admission task.
+        final long admissionGeneration = coordinatorGeneration.get();
         CompletableFuture<Void> inFlightSubmission =
                 submittingJobFutures.putIfAbsent(jobId, jobSubmitFuture);
         if (inFlightSubmission != null) {
@@ -1514,6 +1544,12 @@ public class CoordinatorService {
                         try {
                             JobMaster jobMaster = null;
                             JobInfo submittedJobInfo = null;
+                            PendingJobInfo pendingJobInfo = null;
+                            // Whether this admission actually published its JobMaster. The outcome
+                            // must be tracked independently of jobSubmitFuture: a coordinator
+                            // step-down completes that future exceptionally even when the
+                            // admission it notifies about has already succeeded.
+                            boolean admitted = false;
                             try {
                                 JobImmutableInformation submittedJobImmutableInformation =
                                         deserializeJobImmutableInformation(jobImmutableInformation);
@@ -1571,32 +1607,80 @@ public class CoordinatorService {
                                 // Initialize the JobMaster and add it to the pendingJobQueue,
                                 // ensuring that calling the getJobMaster method does not return
                                 // NULL when the jobSubmitFuture is still running.
-                                PendingJobInfo pendingJobInfo =
+                                pendingJobInfo =
                                         new PendingJobInfo(PendingSourceState.SUBMIT, jobMaster);
-                                pendingJobQueue.put(pendingJobInfo);
-                                // We specify that when init is complete, the submitJob is complete.
-                                jobSubmitFuture.complete(null);
+                                if (admissionGeneration != coordinatorGeneration.get()) {
+                                    // The generation that claimed this job id stepped down while
+                                    // the JobMaster was being initialized. Publishing here would
+                                    // add
+                                    // a JobMaster to a queue that belongs to another generation,
+                                    // next to the one its restore creates for the same job id, so
+                                    // the submission is reported as not completed instead and its
+                                    // durable JobInfo is rolled back below.
+                                    jobSubmitFuture.completeExceptionally(
+                                            new JobException(SUBMISSION_NOT_COMPLETED_MESSAGE));
+                                } else {
+                                    pendingJobQueue.put(pendingJobInfo);
+                                    admitted = true;
+                                    // We specify that when init is complete, the submitJob is
+                                    // complete.
+                                    jobSubmitFuture.complete(null);
+                                }
                             } catch (Throwable e) {
                                 String errorMsg = ExceptionUtils.getMessage(e);
                                 logger.severe(
                                         String.format("submit job %s error %s ", jobId, errorMsg));
                                 jobSubmitFuture.completeExceptionally(new JobException(errorMsg));
                             }
-                            if (!jobSubmitFuture.isCompletedExceptionally()) {
-                                jobMaster.getPhysicalPlan().updateJobState(JobStatus.PENDING);
-                                logger.info(
-                                        String.format(
-                                                "The submit job enter the pending queue , jobId: %s , jobName: %s",
-                                                jobId,
-                                                jobMaster
-                                                        .getJobImmutableInformation()
-                                                        .getJobName()));
+                            boolean steppedDown =
+                                    admissionGeneration != coordinatorGeneration.get();
+                            if (admitted) {
+                                if (steppedDown || jobSubmitFuture.isCompletedExceptionally()) {
+                                    // The admission succeeded but the coordinator stepped down
+                                    // before the response was sent; the step-down completed the RPC
+                                    // future without the admission having failed. The persisted
+                                    // JobInfo is exactly what the next active master restores this
+                                    // job from, so it must survive this coordinator generation;
+                                    // only the local queue entry this generation no longer owns is
+                                    // dropped, identity-conditional so a restored entry for the
+                                    // same job id is never evicted.
+                                    pendingJobQueue.remove(pendingJobInfo);
+                                    runningJobMasterMap.remove(jobId, jobMaster);
+                                    logger.warning(
+                                            String.format(
+                                                    "The job %s has been admitted, but the coordinator stepped down before the submission response was completed. "
+                                                            + "The persisted job info is kept for the next active master to restore; jobName: %s",
+                                                    jobId,
+                                                    jobMaster
+                                                            .getJobImmutableInformation()
+                                                            .getJobName()));
+                                } else {
+                                    jobMaster.getPhysicalPlan().updateJobState(JobStatus.PENDING);
+                                    logger.info(
+                                            String.format(
+                                                    "The submit job enter the pending queue , jobId: %s , jobName: %s",
+                                                    jobId,
+                                                    jobMaster
+                                                            .getJobImmutableInformation()
+                                                            .getJobName()));
+                                }
                             } else {
+                                // The admission did not publish a JobMaster, so this attempt must
+                                // not leave anything behind for its job id. The removals are value
+                                // or identity conditional: the durable JobInfo is removed only
+                                // while it is still the instance this attempt wrote, and the local
+                                // copies only when they are the ones this attempt created, so
+                                // entries created by a newer generation are not evicted alongside
+                                // them.
                                 if (submittedJobInfo != null) {
                                     runningJobInfoIMap.remove(jobId, submittedJobInfo);
                                 }
-                                runningJobMasterMap.remove(jobId);
-                                pendingJobQueue.removeById(jobId);
+                                if (jobMaster != null) {
+                                    runningJobMasterMap.remove(jobId, jobMaster);
+                                }
+                                if (pendingJobInfo != null) {
+                                    pendingJobQueue.remove(pendingJobInfo);
+                                }
                             }
                         } finally {
                             submittingJobFutures.remove(jobId, jobSubmitFuture);

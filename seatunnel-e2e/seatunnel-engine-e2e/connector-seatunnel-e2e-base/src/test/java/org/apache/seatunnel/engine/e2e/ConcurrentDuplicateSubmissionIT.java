@@ -110,13 +110,22 @@ public class ConcurrentDuplicateSubmissionIT {
     private static final long ROW_NUM = 200;
 
     /**
-     * Enough submitters to make the race reachable on a normally loaded CI machine: all of them are
-     * released by the same barrier, while admitting the first job takes tens of milliseconds
-     * (deserialize the DAG, build the physical plan and the checkpoint manager).
+     * Enough submitters to make the race reachable on a normally loaded CI machine: every submitter
+     * builds its execution context and then waits for the same barrier, which is only opened once
+     * all of them are ready. The burst therefore does not depend on how long admitting the first
+     * job takes (deserialize the DAG, build the physical plan and the checkpoint manager); it
+     * depends on the submitters being released together.
      */
     private static final int CONCURRENT_SUBMISSIONS = 8;
 
     private static final long JOB_FINISH_TIMEOUT_SECONDS = 120;
+
+    /**
+     * Upper bound for every handshake the delayed-duplicate test parks a submission in. It is only
+     * reached when the handshake itself breaks, and it turns that break into a submission error
+     * instead of a permanently parked submission thread.
+     */
+    private static final long GATE_TIMEOUT_SECONDS = 60;
 
     private static String stackTraceMessages(Throwable throwable) {
         StringBuilder messages = new StringBuilder();
@@ -167,6 +176,7 @@ public class ConcurrentDuplicateSubmissionIT {
 
             final long jobId = JobIdGenerator.newJobId();
             final SeaTunnelClient sharedClient = engineClient;
+            final CountDownLatch submittersReady = new CountDownLatch(CONCURRENT_SUBMISSIONS);
             final CountDownLatch startSubmitting = new CountDownLatch(1);
             final List<ClientJobProxy> proxies = Collections.synchronizedList(new ArrayList<>());
             final List<Throwable> submissionErrors =
@@ -187,9 +197,11 @@ public class ConcurrentDuplicateSubmissionIT {
                                                         jobConfig,
                                                         seaTunnelConfig,
                                                         jobId);
+                                        submittersReady.countDown();
                                         startSubmitting.await();
                                         proxies.add(environment.execute());
                                     } catch (Throwable e) {
+                                        submittersReady.countDown();
                                         submissionErrors.add(e);
                                     }
                                 },
@@ -198,7 +210,19 @@ public class ConcurrentDuplicateSubmissionIT {
                 submitters.add(submitter);
             }
 
-            startSubmitting.countDown();
+            // Release the burst only once every submitter has built its execution context: the
+            // concurrency of the submission window must not depend on how fast a single submitter
+            // is, otherwise the submitters trickle in one by one instead of racing. The barrier is
+            // released from a finally block so a failed readiness check cannot leave the submitters
+            // parked forever.
+            try {
+                Assertions.assertTrue(
+                        submittersReady.await(60, TimeUnit.SECONDS),
+                        "Every submitter must build its execution context before the burst is "
+                                + "released");
+            } finally {
+                startSubmitting.countDown();
+            }
             for (Thread submitter : submitters) {
                 submitter.join(TimeUnit.SECONDS.toMillis(120));
                 Assertions.assertFalse(
@@ -313,9 +337,16 @@ public class ConcurrentDuplicateSubmissionIT {
      * owner published its {@code JobMaster} and released its claim.
      *
      * <p>Without the post-claim visibility recheck the delayed caller takes the now free claim and
-     * starts a second admission for the same job id, so the job never reaches a terminal state. The
-     * test parks the second entrant in the test-only claim gate, waits until the owner's admission
-     * is published and its claim is released, and only then lets the duplicate continue.
+     * starts a second admission for the same job id, so the job never reaches a terminal state.
+     *
+     * <p>The test enforces that ordering with a two-phase handshake inside the test-only claim
+     * gate, which runs after the synchronous visibility check and before the claim: the first
+     * caller that reaches the gate (the owner) is held there until the second caller has also
+     * reached the gate, so the owner cannot publish before the duplicate passed the visibility
+     * check. The duplicate is then parked while the owner claims, admits and releases the job id;
+     * only when the owner's {@code JobMaster} is published and its claim is gone is the duplicate
+     * resumed. Neither phase depends on admission speed, and both gates are bounded and released in
+     * the test's {@code finally} block.
      */
     @Test
     public void testDelayedDuplicateAfterOwnerPublishedIsNotAdmittedAgain() throws Exception {
@@ -331,7 +362,10 @@ public class ConcurrentDuplicateSubmissionIT {
                         + "target"
                         + File.separator
                         + "delayed-duplicate-submission.conf";
+        // Counted down when the second caller is parked at the claim gate: the owner waits for it
+        // before claiming, so the duplicate cannot miss the gate by arriving after publication.
         CountDownLatch duplicateParked = new CountDownLatch(1);
+        // Released only once the owner's JobMaster is published and its claim is gone.
         CountDownLatch releaseDuplicate = new CountDownLatch(1);
         AtomicInteger claimAttempts = new AtomicInteger();
 
@@ -355,20 +389,27 @@ public class ConcurrentDuplicateSubmissionIT {
             engineClient = new SeaTunnelClient(clientConfig);
 
             final long jobId = JobIdGenerator.newJobId();
-            // Park whichever caller arrives second: the first one is the owner that publishes the
-            // JobMaster, the second one is the delayed duplicate this test is about.
+            // Two-phase handshake, keyed by arrival order at the claim gate (the gate runs after
+            // the synchronous visibility check and before the job id is claimed):
+            // - the first caller is the owner; it must not publish before the second caller has
+            //   passed the visibility check, otherwise that caller would take the already-running
+            //   shortcut and never reach this gate;
+            // - the second caller is the delayed duplicate; it announces its arrival and stays
+            //   parked until the owner's JobMaster is published and its claim has been released.
             setSubmissionClaimGate(
                     id -> {
                         if (id != jobId) {
                             return;
                         }
-                        if (claimAttempts.incrementAndGet() == 2) {
+                        if (claimAttempts.incrementAndGet() == 1) {
+                            awaitGate(
+                                    duplicateParked,
+                                    "The duplicate submission to reach the claim gate");
+                        } else {
                             duplicateParked.countDown();
-                            try {
-                                releaseDuplicate.await(120, TimeUnit.SECONDS);
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                            }
+                            awaitGate(
+                                    releaseDuplicate,
+                                    "The owner submission to publish and release its claim");
                         }
                     });
 
@@ -404,8 +445,22 @@ public class ConcurrentDuplicateSubmissionIT {
             }
             startSubmitting.countDown();
 
-            // The owner's admission must be complete before the duplicate resumes: published
-            // JobMaster and no in-flight claim left for this job id.
+            // Phase one: both submissions passed the synchronous visibility check and are inside
+            // the claim gate, so the owner cannot have published before the duplicate got there.
+            Assertions.assertTrue(
+                    duplicateParked.await(GATE_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "The delayed duplicate must reach the claim gate; if it took the "
+                            + "already-running shortcut the owner published too early and this "
+                            + "test did not exercise the delayed-duplicate window");
+            Assertions.assertEquals(
+                    2,
+                    claimAttempts.get(),
+                    "Both submissions must have reached the claim point; otherwise this test does "
+                            + "not exercise the delayed-duplicate window");
+
+            // Phase two: the owner is now the only admission in flight. Wait until it has
+            // published its JobMaster and released the claim for this job id, then let the
+            // delayed duplicate continue into the post-claim visibility recheck.
             Awaitility.await()
                     .atMost(120, TimeUnit.SECONDS)
                     .pollInterval(50, TimeUnit.MILLISECONDS)
@@ -423,15 +478,13 @@ public class ConcurrentDuplicateSubmissionIT {
                                             inFlightSubmissions(testNode).containsKey(jobId),
                                             "The owner submission must release its claim before "
                                                     + "the delayed duplicate continues"));
-            Assertions.assertTrue(
-                    duplicateParked.await(60, TimeUnit.SECONDS),
-                    "The delayed duplicate must be parked at the claim gate");
 
             releaseDuplicate.countDown();
             for (Thread submitter : submitters) {
                 submitter.join(TimeUnit.SECONDS.toMillis(120));
                 Assertions.assertFalse(
-                        submitter.isAlive(), "A duplicate submission did not return in 120 seconds");
+                        submitter.isAlive(),
+                        "A duplicate submission did not return in 120 seconds");
             }
 
             Assertions.assertTrue(
@@ -444,11 +497,6 @@ public class ConcurrentDuplicateSubmissionIT {
             for (ClientJobProxy proxy : proxies) {
                 Assertions.assertEquals(jobId, proxy.getJobId());
             }
-            Assertions.assertEquals(
-                    2,
-                    claimAttempts.get(),
-                    "Both submissions must have reached the claim point; otherwise this test does "
-                            + "not exercise the delayed-duplicate window");
 
             ClientJobProxy observer = proxies.get(0);
             Awaitility.await()
@@ -467,6 +515,9 @@ public class ConcurrentDuplicateSubmissionIT {
                     "Exactly one execution may be admitted for one job id");
         } finally {
             setSubmissionClaimGate(null);
+            // Release every gate this test may have parked a submission in, so a failed assertion
+            // never leaves a submitting thread waiting for the rest of the test.
+            duplicateParked.countDown();
             releaseDuplicate.countDown();
             if (engineClient != null) {
                 engineClient.close();
@@ -482,6 +533,26 @@ public class ConcurrentDuplicateSubmissionIT {
     private static CoordinatorService coordinatorService(HazelcastInstanceImpl node) {
         SeaTunnelServer server = node.node.getNodeEngine().getService(SeaTunnelServer.SERVICE_NAME);
         return server.getCoordinatorService();
+    }
+
+    /**
+     * Waits for a test handshake latch with a bound, and fails the submission with a diagnostic
+     * naming the missing peer when the bound expires. The gate runs on the submission thread, so a
+     * timeout must surface as a submission error instead of leaving that thread parked forever.
+     */
+    private static void awaitGate(CountDownLatch gate, String waitedFor) {
+        try {
+            if (!gate.await(GATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                throw new IllegalStateException(
+                        "Submission handshake timed out after "
+                                + GATE_TIMEOUT_SECONDS
+                                + " seconds waiting for: "
+                                + waitedFor);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Submission handshake was interrupted", e);
+        }
     }
 
     private static Map<?, ?> inFlightSubmissions(HazelcastInstanceImpl node) throws Exception {

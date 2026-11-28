@@ -1440,6 +1440,98 @@ public class CoordinatorServiceTest {
         }
     }
 
+    /**
+     * A step-down can land between the pending-queue publication of an admission and the completion
+     * of the submission response. It completes the caller-facing future exceptionally, but the
+     * admission itself already succeeded, so the persisted {@code JobInfo} must survive: that
+     * record is what the next active master restores the job from. Keying the rollback on the
+     * submission future lost exactly that record.
+     */
+    @Test
+    void testStepDownAfterPendingPublicationKeepsDurableJobInfoForRestore() throws Exception {
+        String clusterName =
+                TestUtils.getClusterName(
+                        "CoordinatorServiceTest_testStepDownAfterPendingPublicationKeepsDurableJobInfoForRestore");
+        HazelcastInstanceImpl instance =
+                SeaTunnelServerStarter.createHazelcastInstance(clusterName);
+        try {
+            SeaTunnelServer server =
+                    instance.node.getNodeEngine().getService(SeaTunnelServer.SERVICE_NAME);
+            CoordinatorService coordinatorService = server.getCoordinatorService();
+            await().atMost(60, TimeUnit.SECONDS)
+                    .untilAsserted(
+                            () -> Assertions.assertTrue(coordinatorService.isCoordinatorActive()));
+            PublishedThenBlockingPendingJobQueue pendingJobQueue =
+                    new PublishedThenBlockingPendingJobQueue();
+            ReflectionUtils.setField(coordinatorService, "pendingJobQueue", pendingJobQueue);
+
+            long jobId = instance.getFlakeIdGenerator(Constant.SEATUNNEL_ID_GENERATOR_NAME).newId();
+            // A stream job: it must not reach a terminal state on its own, otherwise the terminal
+            // zombie cleanup would remove the very record this test asserts on.
+            LogicalDag logicalDag =
+                    TestUtils.createTestLogicalPlan(
+                            "stream_fake_to_console.conf",
+                            "step_down_after_pending_publication",
+                            jobId);
+            JobImmutableInformation jobImmutableInformation =
+                    new JobImmutableInformation(
+                            jobId,
+                            "Test",
+                            instance.getSerializationService(),
+                            logicalDag,
+                            Collections.emptyList(),
+                            Collections.emptyList());
+            Data data = instance.getSerializationService().toData(jobImmutableInformation);
+
+            PassiveCompletableFuture<Void> submitFuture =
+                    coordinatorService.submitJob(
+                            jobId, data, jobImmutableInformation.isStartWithSavePoint());
+            Assertions.assertTrue(
+                    pendingJobQueue.published.await(60, TimeUnit.SECONDS),
+                    "the submission must publish its JobMaster");
+
+            JobMaster publishedMaster = coordinatorService.getJobMaster(jobId);
+            Assertions.assertNotNull(
+                    publishedMaster,
+                    "the published JobMaster must be visible while the response is still pending");
+
+            // Step down while the admission is between publication and response completion.
+            coordinatorService.clearCoordinatorService();
+
+            await().atMost(20, TimeUnit.SECONDS)
+                    .untilAsserted(
+                            () ->
+                                    Assertions.assertTrue(
+                                            submitFuture.isCompletedExceptionally(),
+                                            "the step-down must fail the pending submission response"));
+            Assertions.assertTrue(
+                    instance.getMap(Constant.IMAP_RUNNING_JOB_INFO).containsKey(jobId),
+                    "a step-down after the pending publication must keep the persisted job info, "
+                            + "it is the record the next active master restores the job from");
+
+            // The next activation on this node must discover and restore the job from that record.
+            await().atMost(60, TimeUnit.SECONDS)
+                    .pollInterval(200, TimeUnit.MILLISECONDS)
+                    .untilAsserted(
+                            () -> {
+                                JobMaster restoredMaster = coordinatorService.getJobMaster(jobId);
+                                Assertions.assertNotNull(
+                                        restoredMaster,
+                                        "the next active master must restore the job from the "
+                                                + "persisted job info");
+                                Assertions.assertNotSame(
+                                        publishedMaster,
+                                        restoredMaster,
+                                        "the restored job must be driven by a new JobMaster, not "
+                                                + "by the one created by the stepped-down "
+                                                + "coordinator");
+                            });
+        } finally {
+            Thread.interrupted();
+            instance.shutdown();
+        }
+    }
+
     @Test
     void testGetPendingJobInfo() {
         SeaTunnelServer server = Mockito.mock(SeaTunnelServer.class);
@@ -2190,6 +2282,38 @@ public class CoordinatorServiceTest {
                 Thread.currentThread().interrupt();
             }
             super.put(element);
+        }
+    }
+
+    /**
+     * Publishes the element and then blocks the inserting thread, so a test can interleave a
+     * coordinator step-down with the window between pending-queue publication and the completion of
+     * the submission response. Only the first insertion blocks; the entries inserted by the restore
+     * of the next generation must go through.
+     */
+    private static class PublishedThenBlockingPendingJobQueue
+            extends PeekBlockingQueue<PendingJobInfo> {
+        private final CountDownLatch published = new CountDownLatch(1);
+        private final CountDownLatch releasePut = new CountDownLatch(1);
+        private final AtomicInteger insertions = new AtomicInteger();
+
+        private PublishedThenBlockingPendingJobQueue() {
+            super(PendingJobInfo::getJobId);
+        }
+
+        @Override
+        public void put(PendingJobInfo element) throws InterruptedException {
+            super.put(element);
+            if (insertions.incrementAndGet() > 1) {
+                return;
+            }
+            published.countDown();
+            try {
+                releasePut.await(60, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                // The step-down interrupts the admission thread; let it finish its bookkeeping.
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
