@@ -85,20 +85,25 @@ import java.util.concurrent.atomic.AtomicReference;
  * ever does to the durable checkpoint-id counter: no resumed checkpoint can allocate an id before
  * it. The test therefore installs an entry listener on this job/pipeline's key in the engine's
  * {@code engine_checkpoint-id-map} on the surviving member while the master is still alive, and
- * records every value written to that key afterwards. A correct recovery writes {@code
- * lastPreFailoverPeriodicCheckpointId + 1} (or a later own checkpoint), so no written value can
- * fall inside the pre-restore savepoint range; a fallback to the original savepoint writes {@code
- * originalSavepointId + 1}, which lands inside that range. Because the observation is the init-time
- * write itself rather than a later id read through the client, the oracle does not depend on how
- * many periodic checkpoints the recovered coordinator completes while the client is still
- * reconnecting, nor on how long the failover or the client retry takes. The recorded init-time
- * value is asserted only after the observer has been fenced on a value that the recovered
- * coordinator publishes after that initialization write (the post-increment value of the
- * post-failover savepoint it allocates): entry events of one key are delivered in write order, so
- * the fence proves the initialization event already reached the observer, while waiting for the
- * savepoint completion alone would not, because its map-event callbacks are asynchronous. That
- * savepoint remains as the end-to-end progress check that the recovered job still allocates and
- * persists a checkpoint above the pre-failover range.
+ * records the {@code (previous value, new value)} pair of every write to that key afterwards.
+ *
+ * <p><b>Those pairs, not a numeric range, identify the initialization write.</b> This key has only
+ * two writers: {@code getAndIncrement()}, whose {@code compute} always stores exactly the previous
+ * value plus one, and the recovery {@code setCount(selectedCheckpointId + 1)}, which is an absolute
+ * write. The single recorded write with {@code newValue != previousValue + 1} is therefore the
+ * recovered coordinator's initialization write, and {@code newValue - 1} is the selected recovery
+ * checkpoint. Because the identification is the write <em>kind</em> rather than a value above some
+ * threshold, it stays unique across generations: a predecessor's later allocations, including ones
+ * delivered only after the failover, are all increments and can never be mistaken for the
+ * initialization, and a recover-from-savepoint fallback cannot hide behind them either, because it
+ * writes an absolute value too. The oracle consequently does not depend on how many checkpoints the
+ * recovered coordinator completed before the observation, on the order in which the two
+ * generations' events were delivered, or on how long the failover or the client retry took. A
+ * correct recovery selects this job's own checkpoint, i.e. the observed {@code newValue - 1} is at
+ * least {@code lastPreFailoverPeriodicCheckpointId}; a fallback to the original savepoint selects
+ * the savepoint id instead, which is below that range. The post-failover savepoint remains as the
+ * end-to-end progress check that the recovered job still allocates and persists a checkpoint above
+ * the pre-failover range.
  *
  * <p>This complements {@link SavepointClusterRestartRestoreIT}, which checks the savepoint survives
  * a full cold cluster restart, and {@code CheckpointCoordinatorFailoverIT}, which checks that a
@@ -225,9 +230,10 @@ public class SavepointRestoreMasterFailoverIT {
 
             // The recovery point is identified from the initialization write of the recovered
             // coordinator's checkpoint-id counter, so start recording that durable counter on the
-            // member that will own the job before the master dies. The counter is monotonically
-            // non-decreasing while this job runs, so every value it holds from here on is above
-            // the last periodic checkpoint the old coordinator completed.
+            // member that will own the job before the master dies. Recording the previous value of
+            // each write as well is what makes that write identifiable later: the previous master
+            // keeps allocating incrementally, while only the recovered coordinator writes the
+            // selected recovery id with an absolute setCount.
             CheckpointIdCounterRecorder counterRecorder =
                     CheckpointIdCounterRecorder.listenOn(survivingNode, jobId, PIPELINE_ID);
 
@@ -263,13 +269,12 @@ public class SavepointRestoreMasterFailoverIT {
                             engineClient, jobClient, restoredJob, jobId, savepointId);
 
             // The recovery point is asserted from the counter write the recovered coordinator
-            // performed while it was initialized, not from the savepoint id below. The assertion
-            // first fences on the counter value published by this post-failover savepoint, an id
-            // only the recovered coordinator can allocate, so the initialization write is part of
-            // the observation it evaluates. Values the previous master wrote before it shut down
-            // are still recorded but can no longer satisfy the wait on their own.
+            // performed while it was initialized, not from the savepoint id below. That write is
+            // the only absolute write to this counter, so it is identified by its own previous and
+            // new value instead of by a numeric fence; the savepoint requested above is only the
+            // end-to-end progress check that follows.
             counterRecorder.assertRecoveryPointIsOwnCheckpoint(
-                    lastPeriodicCheckpointId, savepointId, postFailoverSavepointId);
+                    lastPeriodicCheckpointId, savepointId);
 
             Assertions.assertTrue(
                     postFailoverSavepointId > lastPeriodicCheckpointId,
@@ -461,22 +466,26 @@ public class SavepointRestoreMasterFailoverIT {
     }
 
     /**
-     * Records every value written to this job/pipeline's key in the engine's durable checkpoint-id
-     * counter map ({@code engine_checkpoint-id-map}).
+     * Records every write to this job/pipeline's key in the engine's durable checkpoint-id counter
+     * map ({@code engine_checkpoint-id-map}) as the {@code (previous value, new value)} pair the
+     * map applied.
      *
      * <p>{@code CheckpointManager} resolves the recovery state of a master-failover restore and
      * then calls {@code StateStoreCheckpointIDCounter#setCount(selectedCheckpointId + 1)} before
      * the {@code CheckpointCoordinator} is constructed, so that write is the first thing the
      * recovered coordinator does to the counter: no resumed checkpoint can allocate an id before
-     * it. The map is durable cluster state, so a value written by the re-elected master reaches a
-     * listener installed on the surviving member before any later allocation for this job is
-     * reported, even though the previous master used to own the key.
+     * it. The map is durable cluster state, so a write performed by the re-elected master is
+     * reported to a listener installed on the surviving member, even though the previous master
+     * used to own the key.
+     *
+     * <p>Recording the previous value of each write is what makes the initialization write
+     * identifiable among the writes of both generations; see {@link #findInitializationWrite()}.
      */
     private static final class CheckpointIdCounterRecorder {
 
         private final String counterKey;
 
-        private final List<Long> observedValues = Collections.synchronizedList(new ArrayList<>());
+        private final List<CounterWrite> writes = Collections.synchronizedList(new ArrayList<>());
 
         private CheckpointIdCounterRecorder(String counterKey) {
             this.counterKey = counterKey;
@@ -506,7 +515,7 @@ public class SavepointRestoreMasterFailoverIT {
 
         private void record(EntryEvent<String, Long> event) {
             if (counterKey.equals(event.getKey()) && event.getValue() != null) {
-                observedValues.add(event.getValue());
+                writes.add(new CounterWrite(event.getOldValue(), event.getValue()));
             }
         }
 
@@ -514,91 +523,141 @@ public class SavepointRestoreMasterFailoverIT {
          * Asserts that the recovered coordinator initialized this job's checkpoint id counter from
          * one of the job's own checkpoints instead of the savepoint the job was restored from.
          *
-         * <p><b>Why the observation is fenced before it is evaluated.</b> The listener is installed
-         * while the previous master is still alive, so {@code observedValues} also contains values
-         * written by that master. Waiting for "any recorded value" would accept them, and a
-         * completed post-failover savepoint alone proves only that the savepoint record was
-         * persisted: its map-event callbacks are asynchronous and may not have run yet, so the
-         * initialization write could still be missing from the evaluated snapshot. The wait is
-         * therefore fenced on {@code postFailoverSavepointId}, an id only the recovered coordinator
-         * can allocate. A checkpoint of id {@code id} stores the post-increment counter value
-         * {@code id + 1} ({@code StateStoreCheckpointIDCounter#getAndIncrement}), so the
-         * post-failover savepoint itself publishes {@code postFailoverSavepointId + 1}; because the
-         * caller has already waited for that savepoint to complete, the fence is guaranteed to
-         * become observable and does not depend on a further checkpoint being allocated.
-         *
-         * <p><b>Per-key ordering contract.</b> Hazelcast delivers entry events for a single key in
-         * the order the partition owner applied the writes, and the recovered coordinator performs
-         * its {@code setCount} initialization write before it can allocate any checkpoint of this
-         * job. The fence value is the post-increment value of an allocation only the recovered
-         * coordinator can perform, and that allocation follows the initialization write on the same
-         * key, so once the wait below has seen it the initialization event has already been
-         * delivered; the snapshot evaluated afterwards therefore contains it.
+         * <p>The assertion waits for the initialization write itself to reach this listener, which
+         * is the only delivery it depends on. It deliberately does not infer delivery from a
+         * completed post-failover savepoint or from any counter value: the map-event callbacks of a
+         * completed checkpoint are asynchronous, and the previous master may still have pending
+         * writes whose values overlap the recovered coordinator's range after a faulty rewind, so
+         * neither a savepoint id nor a numeric fence can prove that the initialization event was
+         * observed.
          *
          * <p>Because {@code lastPreFailoverCheckpointId} is a completed checkpoint of this job, the
-         * counter of the still-running job is already above it, and every resumed checkpoint
-         * allocates an id above it as well. Falling back to {@code originalSavepointId} makes the
-         * coordinator write {@code originalSavepointId + 1} at initialization, which is at or below
-         * the pre-failover checkpoint range and is therefore recorded here as a value that is not
-         * above it. Widening the gap between the savepoint and the pre-failover checkpoint cannot
-         * strengthen this assertion and is not needed by it.
+         * recovered coordinator must select that checkpoint or a later own one, so the counter it
+         * initializes to must be above {@code lastPreFailoverCheckpointId}. Falling back to {@code
+         * originalSavepointId} initializes the counter to {@code originalSavepointId + 1} instead,
+         * and this job completed at least two checkpoints above the savepoint before the failover,
+         * so that value is below the threshold asserted here. Widening the gap between the
+         * savepoint and the pre-failover checkpoint cannot strengthen this assertion and is not
+         * needed by it.
          */
         private void assertRecoveryPointIsOwnCheckpoint(
-                long lastPreFailoverCheckpointId,
-                long originalSavepointId,
-                long postFailoverSavepointId) {
-            // Fence first: wait until the counter holds a value the recovered coordinator published
-            // after its initialization write and whose event reached this listener. Because the
-            // events of one key are delivered in write order, that delivery proves the
-            // initialization event, written earlier on the same key, was already delivered.
+                long lastPreFailoverCheckpointId, long originalSavepointId) {
+            CounterWrite initializationWrite = awaitInitializationWrite();
+            long selectedRecoveryCheckpointId = initializationWrite.newValue - 1;
+            Assertions.assertTrue(
+                    selectedRecoveryCheckpointId >= lastPreFailoverCheckpointId,
+                    "The recovered checkpoint coordinator must initialize its checkpoint id "
+                            + "counter from this job's own latest checkpoint ("
+                            + lastPreFailoverCheckpointId
+                            + " or later), not from the savepoint the job was originally restored "
+                            + "from (savepoint="
+                            + originalSavepointId
+                            + "). The initialization write set the counter to "
+                            + initializationWrite.newValue
+                            + ", i.e. it selected checkpoint "
+                            + selectedRecoveryCheckpointId
+                            + ". Recorded counter writes "
+                            + describeWrites());
+            log.info(
+                    "Recovered checkpoint coordinator initialized the checkpoint id counter with"
+                            + " {} (selected recovery checkpoint {}), last pre-failover periodic"
+                            + " checkpoint {}, original savepoint {}; recorded counter writes {}",
+                    initializationWrite,
+                    selectedRecoveryCheckpointId,
+                    lastPreFailoverCheckpointId,
+                    originalSavepointId,
+                    describeWrites());
+        }
+
+        /**
+         * Waits for and returns the durable counter write that initialized the recovered
+         * coordinator's checkpoint id sequence.
+         */
+        private CounterWrite awaitInitializationWrite() {
+            AtomicReference<CounterWrite> initializationWrite = new AtomicReference<>();
             Awaitility.await()
-                    .atMost(30, TimeUnit.SECONDS)
+                    .atMost(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                     .pollInterval(100, TimeUnit.MILLISECONDS)
                     .untilAsserted(
                             () -> {
-                                List<Long> observed = new ArrayList<>(observedValues);
-                                Assertions.assertFalse(
-                                        observed.isEmpty(),
-                                        "No write to the checkpoint id counter of this job was "
-                                                + "observed after the master failover");
-                                Assertions.assertTrue(
-                                        observed.stream()
-                                                .anyMatch(value -> value > postFailoverSavepointId),
+                                CounterWrite found = findInitializationWrite();
+                                Assertions.assertNotNull(
+                                        found,
                                         "Waiting for the recovered checkpoint coordinator to "
-                                                + "advance the checkpoint id counter past the "
-                                                + "post-failover savepoint "
-                                                + postFailoverSavepointId
-                                                + " before evaluating the recovery point. Observed "
-                                                + "counter values: "
-                                                + observed);
+                                                + "initialize the checkpoint id counter of this "
+                                                + "job. Recorded counter writes "
+                                                + describeWrites());
+                                initializationWrite.set(found);
                             });
-            List<Long> values = new ArrayList<>(observedValues);
-            // A counter entry lost during the failover is re-created from
-            // CheckpointIDCounter#INITIAL_CHECKPOINT_ID before the recovery value is written; that
-            // sentinel carries no recovery-point information.
-            long lowestRecordedValue =
-                    values.stream()
-                            .filter(value -> value > CheckpointIDCounter.INITIAL_CHECKPOINT_ID)
-                            .min(Comparator.naturalOrder())
-                            .orElseThrow(
-                                    () ->
-                                            new AssertionError(
-                                                    "Only the counter initialization sentinel was "
-                                                            + "observed: "
-                                                            + values));
-            Assertions.assertTrue(
-                    lowestRecordedValue > lastPreFailoverCheckpointId,
-                    "The recovered checkpoint coordinator must initialize its checkpoint id "
-                            + "counter from this job's own latest checkpoint (at least "
-                            + (lastPreFailoverCheckpointId + 1)
-                            + "), not from the savepoint the job was originally restored from "
-                            + "(savepoint="
-                            + originalSavepointId
-                            + "). A counter value at or below "
-                            + lastPreFailoverCheckpointId
-                            + " proves the failover fell back to that savepoint. Observed counter "
-                            + "values: "
-                            + values);
+            return initializationWrite.get();
+        }
+
+        /**
+         * Returns the recorded write that initialized the recovered coordinator's checkpoint id, or
+         * {@code null} while it has not been delivered yet.
+         *
+         * <p><b>Why the write kind identifies the generation.</b> Only two writers touch this key:
+         * {@code StateStoreCheckpointIDCounter#getAndIncrement()} stores exactly the previous value
+         * plus one ({@code compute(key, current -> current + 1)}), while the recovery
+         * initialization is the single absolute {@code setCount(...)} write. Any write whose new
+         * value is not {@code previousValue + 1} is therefore the recovered coordinator's
+         * initialization write, and its new value minus one is the selected recovery checkpoint.
+         * Neither generation's increments can be mistaken for it, and the identification does not
+         * rely on the recorded list being complete, on the two generations' events arriving in any
+         * particular order, or on values being above a threshold that a rewound counter could
+         * reach.
+         *
+         * <p>A counter entry lost during the failover is re-created with {@code
+         * CheckpointIDCounter#INITIAL_CHECKPOINT_ID} before the recovery value is written. The
+         * re-creation is an entry addition, so it is skipped here; the recovery value is then
+         * written on top of that sentinel and is selected either by the same rule or by its
+         * previous value being the sentinel, which also keeps the (very unlikely) case where the
+         * recovery value happens to be the sentinel plus one identifiable.
+         */
+        private CounterWrite findInitializationWrite() {
+            for (CounterWrite write : snapshot()) {
+                if (write.previousValue == null) {
+                    // An entry addition creates the counter instead of continuing it: this is
+                    // either the sentinel written when the failover lost the entry or, if the
+                    // previous master re-created the key, an old-generation write without a
+                    // recovery id. Both carry no selected checkpoint.
+                    continue;
+                }
+                if (write.previousValue == CheckpointIDCounter.INITIAL_CHECKPOINT_ID
+                        || write.newValue != write.previousValue + 1) {
+                    return write;
+                }
+            }
+            return null;
+        }
+
+        private List<CounterWrite> snapshot() {
+            synchronized (writes) {
+                return new ArrayList<>(writes);
+            }
+        }
+
+        private String describeWrites() {
+            return snapshot().toString();
+        }
+
+        /** One applied write to the counter key: the previous stored value and the new one. */
+        private static final class CounterWrite {
+
+            /** {@code null} when the write created the entry and there was no previous value. */
+            private final Long previousValue;
+
+            private final long newValue;
+
+            private CounterWrite(Long previousValue, long newValue) {
+                this.previousValue = previousValue;
+                this.newValue = newValue;
+            }
+
+            @Override
+            public String toString() {
+                return previousValue + "->" + newValue;
+            }
         }
     }
 
