@@ -30,9 +30,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * Test-only sink with no committer and no writer state.
  *
  * <p>Every writer increments the counter of its {@code tag}, which lets the test observe which
- * pipeline of a job is still producing rows. A writer can be kept busy with a per-row sleep and can
- * be parked on a {@link PipelineFinishSlotReleaseGate} before its first row, so the test controls
- * both "this pipeline finishes now" and "this pipeline keeps running" without touching engine code.
+ * pipeline of a job is still producing rows. A writer can be parked on a {@link
+ * PipelineFinishSlotReleaseGate} hold gate before its first row, and can be limited to one row per
+ * progress permit the test grants, so the test owns both "this pipeline finishes now" and "this
+ * pipeline stays RUNNING until I say so" without touching engine code and without relying on the
+ * duration of a finite workload.
  */
 public class PipelineFinishSlotReleaseSink extends AbstractSimpleSink<SeaTunnelRow, Void> {
 
@@ -40,14 +42,14 @@ public class PipelineFinishSlotReleaseSink extends AbstractSimpleSink<SeaTunnelR
 
     private final String tag;
 
-    private final long sleepMs;
-
     private final String holdGate;
 
-    public PipelineFinishSlotReleaseSink(String tag, long sleepMs, String holdGate) {
+    private final String progressGate;
+
+    public PipelineFinishSlotReleaseSink(String tag, String holdGate, String progressGate) {
         this.tag = tag;
-        this.sleepMs = sleepMs;
         this.holdGate = holdGate;
+        this.progressGate = progressGate;
     }
 
     /** Drops every counter so a repeated run starts from zero. */
@@ -68,7 +70,7 @@ public class PipelineFinishSlotReleaseSink extends AbstractSimpleSink<SeaTunnelR
 
     @Override
     public AbstractSinkWriter<SeaTunnelRow, Void> createWriter(SinkWriter.Context context) {
-        return new PipelineFinishSlotReleaseSinkWriter(tag, sleepMs, holdGate);
+        return new PipelineFinishSlotReleaseSinkWriter(tag, holdGate, progressGate);
     }
 
     @Override

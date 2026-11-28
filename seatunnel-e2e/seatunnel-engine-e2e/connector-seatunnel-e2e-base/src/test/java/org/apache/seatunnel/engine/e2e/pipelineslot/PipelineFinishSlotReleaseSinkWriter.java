@@ -29,9 +29,11 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Writer of {@link PipelineFinishSlotReleaseSink}.
  *
- * <p>It has no side effect other than the per-tag row counter and the optional sleep, so a stalled
- * writer holds exactly one pipeline of the job, never the whole cluster. On interruption (the
- * engine cancels a task) the sleep is abandoned and the interrupt flag is restored so cancellation
+ * <p>It has no side effect other than the per-tag row counter and the test-owned gates, so a parked
+ * writer holds exactly one pipeline of the job, never the whole cluster. The optional hold gate
+ * blocks before the first row; the optional progress gate requires one permit per row, so the
+ * writer can only advance as far as the test allows and then parks again. On interruption (the
+ * engine cancels a task) the wait is abandoned and the interrupt flag is restored so cancellation
  * stays cooperative.
  */
 @Slf4j
@@ -39,18 +41,18 @@ public class PipelineFinishSlotReleaseSinkWriter extends AbstractSinkWriter<SeaT
 
     private final String tag;
 
-    private final long sleepMs;
-
     private final String holdGate;
+
+    private final String progressGate;
 
     private final AtomicLong counter;
 
     private boolean gateReleased;
 
-    public PipelineFinishSlotReleaseSinkWriter(String tag, long sleepMs, String holdGate) {
+    public PipelineFinishSlotReleaseSinkWriter(String tag, String holdGate, String progressGate) {
         this.tag = tag;
-        this.sleepMs = sleepMs;
         this.holdGate = holdGate;
+        this.progressGate = progressGate;
         this.counter = PipelineFinishSlotReleaseSink.counterFor(tag);
     }
 
@@ -62,14 +64,12 @@ public class PipelineFinishSlotReleaseSinkWriter extends AbstractSinkWriter<SeaT
             gateReleased = true;
             log.warn("Writer {} left gate {}", tag, holdGate);
         }
-        counter.incrementAndGet();
-        if (sleepMs > 0) {
-            try {
-                Thread.sleep(sleepMs);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+        if (progressGate != null) {
+            // One permit per row: without a permit the writer stays parked, so the pipeline cannot
+            // finish until the test grants the row.
+            PipelineFinishSlotReleaseGate.acquirePermit(progressGate);
         }
+        counter.incrementAndGet();
     }
 
     @Override

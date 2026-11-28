@@ -48,13 +48,6 @@ public class PipelineFinishSlotReleaseSinkFactory implements TableSinkFactory {
                     .noDefaultValue()
                     .withDescription("Counter key used by the test to observe this writer");
 
-    /** Per-row sleep that keeps the sink (and therefore its pipeline) busy. */
-    public static final Option<Long> SLEEP_MS =
-            Options.key("sleep_ms")
-                    .longType()
-                    .defaultValue(0L)
-                    .withDescription("Milliseconds to sleep after every row");
-
     /** Optional gate that parks the writer before its first row. */
     public static final Option<String> HOLD_GATE =
             Options.key("hold_gate")
@@ -63,6 +56,14 @@ public class PipelineFinishSlotReleaseSinkFactory implements TableSinkFactory {
                     .withDescription(
                             "Gate key; when set the writer blocks before its first row until the test releases it");
 
+    /** Optional gate that makes the writer take one permit per row from the test. */
+    public static final Option<String> PROGRESS_GATE =
+            Options.key("progress_gate")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Progress gate key; when set the writer needs one permit from the test before every row, so its pipeline cannot finish while the test withholds permits");
+
     @Override
     public String factoryIdentifier() {
         return IDENTIFIER;
@@ -70,7 +71,7 @@ public class PipelineFinishSlotReleaseSinkFactory implements TableSinkFactory {
 
     @Override
     public OptionRule optionRule() {
-        return OptionRule.builder().required(TAG).optional(SLEEP_MS, HOLD_GATE).build();
+        return OptionRule.builder().required(TAG).optional(HOLD_GATE, PROGRESS_GATE).build();
     }
 
     @Override
@@ -78,6 +79,6 @@ public class PipelineFinishSlotReleaseSinkFactory implements TableSinkFactory {
         ReadonlyConfig options = context.getOptions();
         return () ->
                 new PipelineFinishSlotReleaseSink(
-                        options.get(TAG), options.get(SLEEP_MS), options.get(HOLD_GATE));
+                        options.get(TAG), options.get(HOLD_GATE), options.get(PROGRESS_GATE));
     }
 }

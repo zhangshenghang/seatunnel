@@ -81,12 +81,15 @@ import java.util.concurrent.TimeUnit;
  *
  * <p><b>How the window is pinned.</b> The job has two independent batch pipelines, each two slots:
  * a fast pipeline whose single writer is parked on {@link PipelineFinishSlotReleaseGate} before its
- * first row, and a slow pipeline whose writer sleeps between rows. The cluster has exactly four
- * fixed slots. The test first shows that a waiting job is queued while both pipelines hold the
- * pool, then releases the gate so the fast pipeline finishes, and asserts that the waiting job
- * completes while the slow pipeline is still RUNNING and still consuming rows. It finally submits a
- * job that needs all four slots and asserts it stays queued until the holder is cancelled, which
- * proves the released slots are exactly the finished pipeline's.
+ * first row, and a slow pipeline whose writer advances one row per progress permit the test grants.
+ * The cluster has exactly four fixed slots. The test first shows that a waiting job is queued while
+ * both pipelines hold the pool, then releases the gate so the fast pipeline finishes, and asserts
+ * that the waiting job completes while the slow pipeline is still RUNNING and still consuming the
+ * rows it is allowed. It finally submits a job that needs all four slots and asserts it stays
+ * queued until the holder is cancelled, which proves the released slots are exactly the finished
+ * pipeline's. Because the slow writer only advances when the test grants a permit, the lifetime of
+ * the sibling is owned by the test: a correct engine cannot fail these assertions just because a
+ * busy runner took longer than a fixed workload.
  */
 @Slf4j
 public class FinishedPipelineSlotReleaseIT {
@@ -112,9 +115,23 @@ public class FinishedPipelineSlotReleaseIT {
 
     private static final String FULL_POOL_TAG = "c_full_pool";
 
+    /** Progress gate of the slow holder pipeline; one permit maps to one written row. */
+    private static final String SLOW_GATE = "a-slow-pipeline-progress";
+
     /**
-     * The holder's slow source produces 3000 rows with a 20 ms sink sleep, i.e. about 60 s, which
-     * is far longer than the test needs to reach and verify the finished-pipeline window.
+     * Rows the slow holder pipeline may write while the test verifies the finished-pipeline window.
+     * The writer parks once these permits are drained, so the sibling pipeline cannot finish.
+     */
+    private static final int INITIAL_SLOW_PERMITS = 3;
+
+    /** Rows granted once on top of {@link #INITIAL_SLOW_PERMITS} to observe further progress. */
+    private static final int ADDITIONAL_SLOW_PERMITS = 2;
+
+    /**
+     * Upper bound for the holder to reach CANCELED after the test cancels it. The holder can only
+     * end because the test cancels it: its slow pipeline advances one row per progress permit and
+     * the test stops granting permits long before this bound, so the timeout covers cancel
+     * propagation only and never races a finite workload.
      */
     private static final long MAX_HOLDER_LIFETIME_SECONDS = 90;
 
@@ -133,6 +150,10 @@ public class FinishedPipelineSlotReleaseIT {
         try {
             PipelineFinishSlotReleaseSink.resetCounters();
             PipelineFinishSlotReleaseGate.reset();
+            // The slow pipeline may only write these rows until the test grants more: its writer
+            // parks on the progress gate afterwards, so nothing below depends on the holder
+            // finishing on its own.
+            PipelineFinishSlotReleaseGate.grantPermits(SLOW_GATE, INITIAL_SLOW_PERMITS);
 
             SeaTunnelConfig seaTunnelConfig = ConfigProvider.locateAndGetSeaTunnelConfig();
             seaTunnelConfig.getHazelcastConfig().setClusterName(clusterName);
@@ -185,6 +206,10 @@ public class FinishedPipelineSlotReleaseIT {
                                         finalHolder.getJobStatus(),
                                         "The holder job must be RUNNING");
                             });
+            // The slow writer has drained every permit granted so far and parked on the next one,
+            // so its pipeline stays RUNNING until the test explicitly grants more rows. From here
+            // on the sibling's lifetime is owned by the test, not by the duration of its workload.
+            awaitSlowWriterParked(INITIAL_SLOW_PERMITS);
             Awaitility.await()
                     .atMost(30, TimeUnit.SECONDS)
                     .pollInterval(100, TimeUnit.MILLISECONDS)
@@ -275,12 +300,25 @@ public class FinishedPipelineSlotReleaseIT {
                     PipelineFinishSlotReleaseSink.rows(WAITING_TAG),
                     "The waiting job must have written its single row exactly once");
 
-            // The holder's sibling pipeline was not touched and keeps writing.
+            // The holder's sibling pipeline was not touched: it is still parked on its progress
+            // gate with exactly the rows the test allowed so far.
             Assertions.assertEquals(
                     JobStatus.RUNNING,
                     holder.getJobStatus(),
                     "The holder job must still be RUNNING after its sibling pipeline finished");
+            Assertions.assertEquals(
+                    (long) INITIAL_SLOW_PERMITS,
+                    PipelineFinishSlotReleaseSink.rows(SLOW_TAG),
+                    "The slow holder pipeline must not advance without a permit from the test");
+            Assertions.assertEquals(
+                    1L,
+                    PipelineFinishSlotReleaseGate.permitWaiting(SLOW_GATE),
+                    "The slow holder pipeline must be parked waiting for its next permit");
+
+            // Grant a known number of extra rows: the untouched sibling must still make progress.
+            // It parks again right after them, so the whole-pool check below cannot race it.
             long slowRowsBefore = PipelineFinishSlotReleaseSink.rows(SLOW_TAG);
+            PipelineFinishSlotReleaseGate.grantPermits(SLOW_GATE, ADDITIONAL_SLOW_PERMITS);
             Awaitility.await()
                     .atMost(30, TimeUnit.SECONDS)
                     .pollInterval(200, TimeUnit.MILLISECONDS)
@@ -295,6 +333,7 @@ public class FinishedPipelineSlotReleaseIT {
                                         finalHolder.getJobStatus(),
                                         "The holder job must remain RUNNING");
                             });
+            awaitSlowWriterParked(INITIAL_SLOW_PERMITS + ADDITIONAL_SLOW_PERMITS);
 
             // Only the slow pipeline's two slots are still owned. A job that needs the whole
             // pool must not start: a double release of the finished pipeline (or of the whole
@@ -326,7 +365,8 @@ public class FinishedPipelineSlotReleaseIT {
                             + " released more than once or the whole job's slots were released");
 
             // Cancelling the holder returns the remaining slots; the queued job then runs to
-            // completion on the full pool.
+            // completion on the full pool. The sibling cannot end on its own before that: it is
+            // parked on its progress gate because the test stops granting permits here.
             holder.cancelJob();
             Awaitility.await()
                     .atMost(MAX_HOLDER_LIFETIME_SECONDS, TimeUnit.SECONDS)
@@ -352,6 +392,9 @@ public class FinishedPipelineSlotReleaseIT {
                     PipelineFinishSlotReleaseSink.rows(FULL_POOL_TAG),
                     "The whole-pool job must write every row of its three readers exactly once");
         } finally {
+            // The fixture owns the writers' lifetime: open every hold gate and grant every
+            // progress permit first, so no writer stays parked while the jobs below are cancelled.
+            PipelineFinishSlotReleaseGate.releaseAll();
             cancelQuietly(holder);
             cancelQuietly(waitingJob);
             cancelQuietly(replacementJob);
@@ -388,6 +431,30 @@ public class FinishedPipelineSlotReleaseIT {
         Assertions.assertNotNull(
                 jobMaster, "The holder job master must still be attached to its job " + jobId);
         return jobMaster.getPhysicalPlan().getPipelineList();
+    }
+
+    /**
+     * Asserts that the slow holder writer wrote exactly {@code expectedRows} rows and is parked
+     * waiting for its next progress permit, i.e. the sibling pipeline can neither advance nor
+     * finish until the test grants another permit.
+     */
+    private static void awaitSlowWriterParked(long expectedRows) {
+        Awaitility.await()
+                .atMost(30, TimeUnit.SECONDS)
+                .pollInterval(100, TimeUnit.MILLISECONDS)
+                .untilAsserted(
+                        () -> {
+                            Assertions.assertEquals(
+                                    expectedRows,
+                                    PipelineFinishSlotReleaseSink.rows(SLOW_TAG),
+                                    "The slow holder pipeline must only write the rows the test"
+                                            + " allowed");
+                            Assertions.assertEquals(
+                                    1L,
+                                    PipelineFinishSlotReleaseGate.permitWaiting(SLOW_GATE),
+                                    "The slow holder pipeline must be parked waiting for its next"
+                                            + " progress permit");
+                        });
     }
 
     /**
