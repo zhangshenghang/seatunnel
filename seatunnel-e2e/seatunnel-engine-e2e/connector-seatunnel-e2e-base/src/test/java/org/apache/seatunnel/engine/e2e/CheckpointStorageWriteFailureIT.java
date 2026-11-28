@@ -57,12 +57,17 @@ import lombok.extern.slf4j.Slf4j;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -111,6 +116,12 @@ public class CheckpointStorageWriteFailureIT {
     private static final int HISTORY_LIMIT = 200;
 
     private static final long STATE_TIMEOUT_SECONDS = 120;
+
+    /**
+     * Hard bound for one cleanup step. A cluster that is already half dead must not be able to hang
+     * the JVM through a cleanup call that waits on a response future without a timeout.
+     */
+    private static final long CLEANUP_TIMEOUT_SECONDS = 60;
 
     @Test
     public void testCheckpointStorageFailureRestoresPipelineAndRecovers() throws Exception {
@@ -236,19 +247,28 @@ public class CheckpointStorageWriteFailureIT {
                     "the engine must have retried the checkpoint write after the failures");
 
             // ---- Phase 3: the rejected checkpoints must not be selectable for recovery.
-            // The job keeps checkpointing every second, so read storage first and then snapshot the
-            // successful writes: every persisted id was written before that snapshot.
+            // The job keeps checkpointing every second, so both the storage listing and the
+            // client's selection are moving targets: observe them first, then let the storage's
+            // completed-write ledger catch up with those exact ids (see awaitStoredCheckpointIds).
             List<PipelineState> persisted = getAllCheckpoints(checkpointStorage, jobId);
             Set<Long> persistedIds =
                     persisted.stream()
                             .map(PipelineState::getCheckpointId)
                             .collect(Collectors.toSet());
-            List<Long> storedIds = new ArrayList<>(FailingCheckpointStorage.storedCheckpointIds());
-            Assertions.assertFalse(
-                    storedIds.isEmpty(), "no checkpoint was persisted after recovery");
+            List<JobPipelineCheckpointData> selectable =
+                    jobClient.getCheckpointData(jobId, RestoreMode.CHECKPOINT);
+            Assertions.assertEquals(
+                    1,
+                    selectable.size(),
+                    "the job must expose exactly one checkpoint for its pipeline: " + selectable);
+            long selectableId = selectable.get(0).getCheckpointId();
             Assertions.assertFalse(persistedIds.isEmpty(), "storage holds no persisted checkpoint");
             Assertions.assertEquals(
                     persistedIds.size(), persisted.size(), "a checkpoint must be persisted once");
+            List<Long> observedIds = new ArrayList<>(persistedIds);
+            observedIds.add(selectableId);
+            awaitStoredCheckpointIds(observedIds);
+            List<Long> storedIds = new ArrayList<>(FailingCheckpointStorage.storedCheckpointIds());
             for (Long persistedId : persistedIds) {
                 Assertions.assertTrue(
                         storedIds.contains(persistedId),
@@ -274,14 +294,6 @@ public class CheckpointStorageWriteFailureIT {
                             + ", persisted="
                             + persistedIds
                             + ")");
-
-            List<JobPipelineCheckpointData> selectable =
-                    jobClient.getCheckpointData(jobId, RestoreMode.CHECKPOINT);
-            Assertions.assertEquals(
-                    1,
-                    selectable.size(),
-                    "the job must expose exactly one checkpoint for its pipeline: " + selectable);
-            long selectableId = selectable.get(0).getCheckpointId();
             Assertions.assertTrue(
                     selectableId >= latestPersistedId,
                     "the client must select the latest successfully persisted checkpoint, but "
@@ -342,7 +354,8 @@ public class CheckpointStorageWriteFailureIT {
                             });
 
             // ---- Phase 5: cancellation still cleans the persisted checkpoint data.
-            job.cancelJob();
+            Assertions.assertTrue(
+                    cancelJobBounded(job), "the job cancel request must complete before cleanup");
             awaitJobStatus(coordinatorService, jobId, JobStatus.CANCELED);
             Awaitility.await()
                     .atMost(30, TimeUnit.SECONDS)
@@ -353,20 +366,36 @@ public class CheckpointStorageWriteFailureIT {
                                             getAllCheckpoints(checkpointStorage, jobId).isEmpty(),
                                             "cancelling the job must clean its checkpoint data"));
         } finally {
-            if (job != null) {
+            // Release every resource this test owns, even when an assertion above failed: a broken
+            // cluster must not keep the member, the client, the temp namespace or the plugin's
+            // global injection state alive for the next test in the same JVM. Cleanup failures and
+            // timeouts are logged so they cannot mask the original failure, and the nested finally
+            // blocks guarantee that each later resource is still released.
+            try {
+                cancelJobBounded(job);
+            } finally {
                 try {
-                    job.cancelJob();
+                    if (engineClient != null) {
+                        engineClient.close();
+                    }
                 } catch (Throwable e) {
-                    log.info("Ignoring failure while cancelling job during cleanup", e);
+                    log.warn("Failed to close the engine client during cleanup", e);
+                } finally {
+                    try {
+                        if (node != null) {
+                            node.shutdown();
+                        }
+                    } catch (Throwable e) {
+                        log.warn("Failed to shut down the member during cleanup", e);
+                    } finally {
+                        deleteRecursively(namespace);
+                        // The member is gone, so no checkpoint writer can still be appending to the
+                        // plugin state: reset the static injection controls (including the failure
+                        // counter) for a subsequent test in this JVM.
+                        FailingCheckpointStorage.reset(0);
+                    }
                 }
             }
-            if (engineClient != null) {
-                engineClient.close();
-            }
-            if (node != null) {
-                node.shutdown();
-            }
-            deleteRecursively(namespace);
         }
     }
 
@@ -399,6 +428,81 @@ public class CheckpointStorageWriteFailureIT {
             return checkpointStorage.getAllCheckpoints(String.valueOf(jobId));
         } catch (CheckpointStorageException e) {
             return Assertions.fail("Failed to list checkpoints of job " + jobId, e);
+        }
+    }
+
+    /**
+     * Waits until {@link FailingCheckpointStorage} has recorded a successful write for every
+     * checkpoint id that the test observed in storage.
+     *
+     * <p>The job keeps checkpointing every second while this test reads storage, so a storage
+     * listing and the client's checkpoint selection are moving targets: a newer checkpoint can be
+     * persisted between two reads. The delegated local-file storage also publishes the checkpoint
+     * file before {@code storeCheckPoint} appends the id to the completed-write ledger, so the
+     * ledger can lag the file listing by that one window. The ledger only grows, so re-reading it
+     * until the already observed ids show up yields a consistent snapshot: a checkpoint that is
+     * readable in storage without a recorded successful write still fails the test, while a newer
+     * checkpoint that legitimately persisted in the meantime no longer can.
+     *
+     * @param observedIds checkpoint ids that storage returned to the test
+     */
+    private static void awaitStoredCheckpointIds(Collection<Long> observedIds) {
+        Awaitility.await()
+                .atMost(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .pollInterval(100, TimeUnit.MILLISECONDS)
+                .untilAsserted(
+                        () -> {
+                            List<Long> storedIds =
+                                    new ArrayList<>(FailingCheckpointStorage.storedCheckpointIds());
+                            for (Long observedId : observedIds) {
+                                Assertions.assertTrue(
+                                        storedIds.contains(observedId),
+                                        "checkpoint "
+                                                + observedId
+                                                + " is readable in checkpoint storage but the "
+                                                + "storage plugin never recorded a successful "
+                                                + "write for it: "
+                                                + storedIds);
+                            }
+                        });
+    }
+
+    /**
+     * Sends a job cancel request and waits for it with a hard time bound.
+     *
+     * <p>{@link ClientJobProxy#cancelJob()} joins a response future that has no timeout of its own,
+     * so it can block forever when the member that owns the job is already unhealthy.
+     *
+     * @param job job to cancel, {@code null} when the job was never submitted
+     * @return {@code true} if the cancel request completed within {@link #CLEANUP_TIMEOUT_SECONDS}
+     */
+    private static boolean cancelJobBounded(ClientJobProxy job) {
+        if (job == null) {
+            return true;
+        }
+        ExecutorService executor =
+                Executors.newSingleThreadExecutor(
+                        runnable -> {
+                            Thread thread =
+                                    new Thread(runnable, "checkpoint-storage-failure-cancel");
+                            thread.setDaemon(true);
+                            return thread;
+                        });
+        try {
+            executor.submit(job::cancelJob).get(CLEANUP_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return true;
+        } catch (TimeoutException e) {
+            log.warn("The job cancel request did not complete within {}s", CLEANUP_TIMEOUT_SECONDS);
+            return false;
+        } catch (ExecutionException e) {
+            log.warn("The job cancel request failed", e.getCause());
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while waiting for the job cancel request", e);
+            return false;
+        } finally {
+            executor.shutdownNow();
         }
     }
 
