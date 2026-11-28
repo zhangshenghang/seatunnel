@@ -31,10 +31,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p>Every row is accepted, so the pipeline only fails once the source has finished and the engine
  * asks the writer to close. {@link SinkWriter#close()} always throws, which makes the failure
- * happen in the last phase of the task lifecycle, after all records were written and after the
- * close handshake that a checkpoint-enabled batch job uses to publish its final checkpoint. The
- * fixture never fails earlier, so a job that reports {@code FINISHED} here provably ignored a
- * failed terminal close.
+ * happen in the last phase of the task lifecycle, after all records were written. The job config
+ * does not set {@code checkpoint.interval}, so the engine disables periodic checkpointing for this
+ * BATCH job and the terminal close is the only remaining failure point. The fixture never fails
+ * earlier, so a job that reports {@code FINISHED} here provably ignored a failed terminal close.
  *
  * <p>The Zeta cluster of the engine E2E tests runs inside the test JVM, so these static counters
  * are shared between the test and the task threads.
@@ -50,10 +50,13 @@ public class CloseFailingSink implements SeaTunnelSink<SeaTunnelRow, Void, Void,
 
     private static final AtomicInteger CLOSE_FAILURES = new AtomicInteger();
 
+    private static final AtomicInteger WRITER_CREATIONS = new AtomicInteger();
+
     public static void reset() {
         RECEIVED_ROWS.set(0L);
         CLOSE_CALLS.set(0);
         CLOSE_FAILURES.set(0);
+        WRITER_CREATIONS.set(0);
     }
 
     public static long receivedRows() {
@@ -68,6 +71,11 @@ public class CloseFailingSink implements SeaTunnelSink<SeaTunnelRow, Void, Void,
         return CLOSE_FAILURES.get();
     }
 
+    /** Counts writer creations, so the test can prove the pipeline was deployed only once. */
+    public static int writerCreations() {
+        return WRITER_CREATIONS.get();
+    }
+
     @Override
     public String getPluginName() {
         return CloseFailingSinkFactory.IDENTIFIER;
@@ -76,6 +84,7 @@ public class CloseFailingSink implements SeaTunnelSink<SeaTunnelRow, Void, Void,
     @Override
     public SinkWriter<SeaTunnelRow, Void, Void> createWriter(SinkWriter.Context context)
             throws IOException {
+        WRITER_CREATIONS.incrementAndGet();
         return new FailingCloseWriter();
     }
 

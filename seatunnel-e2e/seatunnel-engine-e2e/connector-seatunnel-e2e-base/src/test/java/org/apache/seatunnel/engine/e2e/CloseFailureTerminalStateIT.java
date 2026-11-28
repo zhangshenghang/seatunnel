@@ -30,6 +30,7 @@ import org.apache.seatunnel.engine.common.job.JobResult;
 import org.apache.seatunnel.engine.common.job.JobStatus;
 import org.apache.seatunnel.engine.core.job.PipelineStatus;
 import org.apache.seatunnel.engine.e2e.terminalclose.CloseFailingSink;
+import org.apache.seatunnel.engine.server.CoordinatorService;
 import org.apache.seatunnel.engine.server.SeaTunnelServer;
 import org.apache.seatunnel.engine.server.SeaTunnelServerStarter;
 import org.apache.seatunnel.engine.server.dag.physical.PipelineLocation;
@@ -55,9 +56,9 @@ import java.util.concurrent.TimeUnit;
  * fail the job, never be reported as a successful finish.
  *
  * <p><b>The contract.</b> On a single in-process node with a fixed two-slot pool ({@code
- * dynamic-slot=false}, {@code slot-num=2}, WAIT scheduling), a one-parallelism BATCH job whose sink
- * accepts every row and then throws from {@link org.apache.seatunnel.api.sink.SinkWriter#close()}
- * must:
+ * dynamic-slot=false}, {@code slot-num=2}, default REJECT scheduling), a one-parallelism BATCH job
+ * whose sink accepts every row and then throws from {@link
+ * org.apache.seatunnel.api.sink.SinkWriter#close()} must:
  *
  * <ol>
  *   <li>resolve its client completion future as {@code FAILED}, not {@code FINISHED}, and carry the
@@ -167,27 +168,43 @@ public class CloseFailureTerminalStateIT {
             Assertions.assertTrue(
                     CloseFailingSink.closeFailures() >= 1,
                     "The sink close must actually have been invoked and must have failed");
+            // A retry that recreates the writer would still look like one deployment in the row
+            // total when it fails again before writing, so count the creations themselves.
+            Assertions.assertEquals(
+                    1,
+                    CloseFailingSink.writerCreations(),
+                    "The failing close must not trigger a hidden redeploy that recreated the "
+                            + "sink writer");
             log.warn(
-                    "Sink observed {} rows, {} close calls and {} close failures",
+                    "Sink observed {} rows, {} writer creations, {} close calls and {} close "
+                            + "failures",
                     CloseFailingSink.receivedRows(),
+                    CloseFailingSink.writerCreations(),
                     CloseFailingSink.closeCalls(),
                     CloseFailingSink.closeFailures());
 
-            // 3. FAILED must be the sticky terminal state after the coordinator's cleanup.
-            Thread.sleep(3000L);
+            // 3. FAILED must be the sticky terminal state after the coordinator's cleanup. Wait for
+            // the real cleanup boundary first: JobHistoryService can also answer from a still
+            // registered JobMaster, so an assertion made while the master is alive would not prove
+            // that the terminal state survived its removal.
+            NodeEngineImpl nodeEngine = node.node.nodeEngine;
+            Address workerAddress = node.node.address;
+            SeaTunnelServer seaTunnelServer = nodeEngine.getService(SeaTunnelServer.SERVICE_NAME);
+            CoordinatorService coordinatorService = seaTunnelServer.getCoordinatorService();
+            Awaitility.await()
+                    .atMost(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .pollInterval(200, TimeUnit.MILLISECONDS)
+                    .until(() -> coordinatorService.getJobMaster(jobId) == null);
             Assertions.assertEquals(
                     JobStatus.FAILED,
                     jobProxy.getJobStatus(),
-                    "The terminal FAILED state of a close-failed job must be stable after cleanup");
+                    "The terminal FAILED state of a close-failed job must be stable after the "
+                            + "coordinator released its job master");
 
             // 3b. The engine's finished-job history must keep the FAILED state, the per-pipeline
             // terminal state and the close failure, so the outcome stays queryable after the
             // coordinator released the job master and its runtime state.
-            NodeEngineImpl nodeEngine = node.node.nodeEngine;
-            Address workerAddress = node.node.address;
-            SeaTunnelServer seaTunnelServer = nodeEngine.getService(SeaTunnelServer.SERVICE_NAME);
-            JobHistoryService jobHistoryService =
-                    seaTunnelServer.getCoordinatorService().getJobHistoryService();
+            JobHistoryService jobHistoryService = coordinatorService.getJobHistoryService();
             Awaitility.await()
                     .atMost(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                     .pollInterval(200, TimeUnit.MILLISECONDS)
@@ -275,7 +292,8 @@ public class CloseFailureTerminalStateIT {
                     JobStatus.FINISHED,
                     probeCompletionFuture.get(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS),
                     "A replacement job with the failed job's footprint must still finish; a "
-                            + "PENDING probe means the failed close leaked capacity");
+                            + "probe that stays PENDING or is rejected means the failed close "
+                            + "leaked capacity");
         } finally {
             if (engineClient != null) {
                 engineClient.close();
