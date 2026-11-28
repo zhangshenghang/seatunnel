@@ -58,12 +58,16 @@ public class ForceCancelBlockingSink implements SeaTunnelSink<SeaTunnelRow, Void
 
     private static volatile CountDownLatch blockedInWrite = new CountDownLatch(1);
 
+    /** Signalled once a parked writer has left {@code write} after {@link #release()}. */
+    private static volatile CountDownLatch exitedWrite = new CountDownLatch(1);
+
     public static void reset() {
         RECEIVED_ROWS.set(0L);
         CANCEL_INTERRUPTS.set(0);
         ARMED.set(false);
         RELEASED.set(false);
         blockedInWrite = new CountDownLatch(1);
+        exitedWrite = new CountDownLatch(1);
     }
 
     /** Makes the next write park until {@link #release()} is called. */
@@ -89,20 +93,31 @@ public class ForceCancelBlockingSink implements SeaTunnelSink<SeaTunnelRow, Void
         return blockedInWrite.getCount() == 0L;
     }
 
+    /** True once a writer that was parked inside {@code write} has returned from that call. */
+    public static boolean hasExitedWrite() {
+        return exitedWrite.getCount() == 0L;
+    }
+
     public static boolean isReleased() {
         return RELEASED.get();
     }
 
     private static void awaitRelease() {
         blockedInWrite.countDown();
-        while (!RELEASED.get()) {
-            try {
-                Thread.sleep(25L);
-            } catch (InterruptedException e) {
-                // Deliberately swallow the interrupt: the whole point of this fixture is a task
-                // that refuses the cooperative cancel handshake.
-                CANCEL_INTERRUPTS.incrementAndGet();
+        try {
+            while (!RELEASED.get()) {
+                try {
+                    Thread.sleep(25L);
+                } catch (InterruptedException e) {
+                    // Deliberately swallow the interrupt: the whole point of this fixture is a
+                    // task that refuses the cooperative cancel handshake.
+                    CANCEL_INTERRUPTS.incrementAndGet();
+                }
             }
+        } finally {
+            // The release signal alone says nothing about the parked call returning; the test
+            // waits on this exit signal before it concludes the job stays terminal.
+            exitedWrite.countDown();
         }
     }
 

@@ -26,11 +26,19 @@ import org.apache.seatunnel.engine.common.Constant;
 import org.apache.seatunnel.engine.common.config.ConfigProvider;
 import org.apache.seatunnel.engine.common.config.JobConfig;
 import org.apache.seatunnel.engine.common.config.SeaTunnelConfig;
+import org.apache.seatunnel.engine.common.config.server.ScheduleStrategy;
+import org.apache.seatunnel.engine.common.job.JobResult;
 import org.apache.seatunnel.engine.common.job.JobStatus;
+import org.apache.seatunnel.engine.common.utils.PassiveCompletableFuture;
 import org.apache.seatunnel.engine.e2e.forcecancel.ForceCancelBlockingSink;
 import org.apache.seatunnel.engine.server.SeaTunnelServer;
 import org.apache.seatunnel.engine.server.SeaTunnelServerStarter;
+import org.apache.seatunnel.engine.server.TaskExecutionService;
+import org.apache.seatunnel.engine.server.dag.physical.PhysicalVertex;
 import org.apache.seatunnel.engine.server.dag.physical.PipelineLocation;
+import org.apache.seatunnel.engine.server.exception.TaskGroupContextNotFoundException;
+import org.apache.seatunnel.engine.server.execution.TaskGroupLocation;
+import org.apache.seatunnel.engine.server.master.JobMaster;
 import org.apache.seatunnel.engine.server.resourcemanager.ResourceManager;
 
 import org.awaitility.Awaitility;
@@ -44,8 +52,11 @@ import com.hazelcast.map.IMap;
 import com.hazelcast.spi.impl.NodeEngineImpl;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * Guards the Zeta force-stop contract against a task that refuses the cooperative cancellation
@@ -60,15 +71,16 @@ import java.util.concurrent.TimeUnit;
  * write()} must therefore:
  *
  * <ol>
- *   <li>resolve the force-stop RPC and the client completion future with {@code CANCELED} in a
- *       bounded window, while the task is still provably parked (the parked writer is released only
- *       after the assertions),
+ *   <li>resolve the force-stop RPC, the live {@code JobMaster} completion future and the client
+ *       completion future with {@code CANCELED} in a bounded window, while the task is still
+ *       provably parked (the parked writer is released only after the assertions),
  *   <li>reach the terminal {@code CANCELED} state instead of staying in {@code CANCELING} or
  *       degrading to {@code UNKNOWABLE} after the coordinator releases the job master,
  *   <li>return every fixed slot it owned to the worker, proven both through {@code
  *       engine_ownedSlotProfilesIMap} and functionally by a second job that needs the same whole
  *       pool reaching {@code RUNNING},
- *   <li>stay {@code CANCELED} after the parked writer is finally released.
+ *   <li>stay {@code CANCELED} after the parked writer is finally released and its worker task group
+ *       has been torn down.
  * </ol>
  *
  * <p><b>Why this is not already covered.</b> {@code
@@ -87,8 +99,10 @@ import java.util.concurrent.TimeUnit;
  * <p><b>Regression it catches.</b> If {@code PhysicalVertex#forceStop} or the {@code stopJob}
  * branch starts waiting for the task terminal callback (for example by dropping the direct {@code
  * CANCELED} transition and relying on {@code cancel()}), this test fails at the terminal-state
- * assertion because the parked writer can never ack. If the force path stops returning the
- * pipeline's fixed slots, the capacity probe stays {@code PENDING} and the test fails there.
+ * assertion because the parked writer can never ack, and at the captured live {@code JobMaster}
+ * completion future if the terminal state is only recorded in finished-job history. If the force
+ * path stops returning the pipeline's fixed slots, the capacity probe stays {@code PENDING} and the
+ * test fails there.
  */
 @Slf4j
 public class ForceCancelUnresponsiveTaskIT {
@@ -109,6 +123,23 @@ public class ForceCancelUnresponsiveTaskIT {
 
     private static final long FORCE_CANCEL_TIMEOUT_SECONDS = 30;
 
+    /**
+     * Finished-job history retention for this fixture. The terminal record of the force-cancelled
+     * job has to outlive the whole post-cancel phase, because the last status check reads it back
+     * from finished-job history after the coordinator released the JobMaster. The module's {@code
+     * seatunnel.yaml} retains finished jobs for one minute, which the combined deadlines below can
+     * exceed on a slow CI run.
+     */
+    private static final int HISTORY_EXPIRE_MINUTES = 30;
+
+    /**
+     * How long the client completion request must stay outstanding before the force cancel is
+     * issued. A request answered from finished-job history returns immediately, so an uninterrupted
+     * window of this length while the job is still RUNNING shows that the request is attached to
+     * the live JobMaster and not satisfied from history.
+     */
+    private static final long CLIENT_WAIT_ATTACH_SECONDS = 2;
+
     @Test
     public void testForceCancelStopsJobWhoseTaskIgnoresCooperativeCancel() throws Exception {
         String testCaseName = "testForceCancelStopsJobWhoseTaskIgnoresCooperativeCancel";
@@ -123,6 +154,13 @@ public class ForceCancelUnresponsiveTaskIT {
             seaTunnelConfig.getEngineConfig().getHttpConfig().setEnabled(false);
             seaTunnelConfig.getEngineConfig().getSlotServiceConfig().setDynamicSlot(false);
             seaTunnelConfig.getEngineConfig().getSlotServiceConfig().setSlotNum(SLOT_NUM);
+            // The capacity probe is asserted to stay PENDING while the fixed slots are not
+            // returned. With the module default (REJECT) an unschedulable job is failed before it
+            // enters the pending queue instead, so WAIT is what makes that diagnostic meaningful.
+            seaTunnelConfig.getEngineConfig().setScheduleStrategy(ScheduleStrategy.WAIT);
+            // Keep the finished-job record of the force-cancelled job readable for the whole
+            // post-cancel phase instead of inheriting the module's one-minute retention.
+            seaTunnelConfig.getEngineConfig().setHistoryJobExpireMinutes(HISTORY_EXPIRE_MINUTES);
 
             node = SeaTunnelServerStarter.createHazelcastInstance(seaTunnelConfig);
 
@@ -195,6 +233,64 @@ public class ForceCancelUnresponsiveTaskIT {
                                             "The sink writer must be parked inside write() before "
                                                     + "the force cancel is issued"));
 
+            // Capture every completion observation before the force cancel, so none of them can
+            // be satisfied from the finished-job history written once the JobMaster is gone.
+            //
+            // CoordinatorService#waitForJobComplete attaches a request that arrives while the job
+            // is running to the live JobMaster completion future, and only falls back to finished
+            // history once the JobMaster has been removed. A request issued after the removal
+            // therefore cannot fail even if the force path stores CANCELED but never resolves the
+            // live future, so the client wait has to be outstanding up front.
+            JobMaster liveJobMaster = seaTunnelServer.getCoordinatorService().getJobMaster(jobId);
+            Assertions.assertNotNull(
+                    liveJobMaster,
+                    "The fixture job must still be owned by a live JobMaster before the force "
+                            + "cancel is issued");
+            PassiveCompletableFuture<JobResult> liveCompletionFuture =
+                    liveJobMaster.getJobMasterCompleteFuture();
+            List<TaskGroupLocation> fixtureTaskGroups =
+                    liveJobMaster.getPhysicalPlan().getPipelineList().stream()
+                            .flatMap(pipeline -> pipeline.getPhysicalVertexList().stream())
+                            .map(PhysicalVertex::getTaskGroupLocation)
+                            .collect(Collectors.toList());
+            Assertions.assertFalse(
+                    fixtureTaskGroups.isEmpty(),
+                    "The fixture job must expose the task group of its parked sink writer");
+            TaskExecutionService taskExecutionService = seaTunnelServer.getTaskExecutionService();
+
+            CountDownLatch clientWaitIssued = new CountDownLatch(1);
+            CompletableFuture<JobStatus> completionFuture =
+                    CompletableFuture.supplyAsync(
+                            () -> {
+                                clientWaitIssued.countDown();
+                                return jobProxy.waitForJobComplete();
+                            });
+            Assertions.assertTrue(
+                    clientWaitIssued.await(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "The client completion request must be issued before the force cancel");
+            Awaitility.await()
+                    .atMost(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .pollInterval(100, TimeUnit.MILLISECONDS)
+                    .during(CLIENT_WAIT_ATTACH_SECONDS, TimeUnit.SECONDS)
+                    .untilAsserted(
+                            () -> {
+                                Assertions.assertFalse(
+                                        completionFuture.isDone(),
+                                        "The client completion request must stay outstanding "
+                                                + "while the job is still RUNNING; an immediate "
+                                                + "answer means it was served from finished-job "
+                                                + "history instead of the live JobMaster");
+                                Assertions.assertNotNull(
+                                        seaTunnelServer.getCoordinatorService().getJobMaster(jobId),
+                                        "The JobMaster must stay live while the client "
+                                                + "completion request is outstanding");
+                                Assertions.assertEquals(
+                                        JobStatus.RUNNING,
+                                        jobProxy.getJobStatus(),
+                                        "The fixture job must still be RUNNING while the client "
+                                                + "completion request is outstanding");
+                            });
+
             // 1. The force-stop request itself must resolve even though the task is parked.
             CompletableFuture<Void> forceCancelFuture =
                     CompletableFuture.runAsync(
@@ -221,14 +317,39 @@ public class ForceCancelUnresponsiveTaskIT {
                     ForceCancelBlockingSink.isReleased(),
                     "The writer must not have been released before the terminal-state assertions");
 
-            // 3. The client completion future must carry the same terminal state, not UNKNOWABLE.
-            CompletableFuture<JobStatus> completionFuture =
-                    CompletableFuture.supplyAsync(jobProxy::waitForJobComplete);
+            // 3. The live JobMaster completion future captured before the force cancel must
+            // resolve on the force path itself, still while the writer is parked. This is the
+            // future an already attached client wait resolves through, and it is distinct from the
+            // finished-job record written next to it, so a force path that stores CANCELED but
+            // leaves the live future unresolved fails here.
+            JobResult liveJobResult =
+                    liveCompletionFuture.get(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            Assertions.assertEquals(
+                    JobStatus.CANCELED,
+                    liveJobResult.getStatus(),
+                    "The live JobMaster completion future of a force-cancelled job must resolve to "
+                            + "CANCELED");
+            Assertions.assertFalse(
+                    ForceCancelBlockingSink.isReleased(),
+                    "The writer must not have been released before the live completion future "
+                            + "resolved");
+            Assertions.assertFalse(
+                    ForceCancelBlockingSink.hasExitedWrite(),
+                    "The parked writer must not have left write() before the live completion "
+                            + "future resolved");
+
+            // 3b. The client completion request, outstanding since before the force cancel, must
+            // resolve to the same terminal state while the writer is still held, proving the
+            // client-visible future of a forced job is not left hanging.
             Assertions.assertEquals(
                     JobStatus.CANCELED,
                     completionFuture.get(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS),
                     "The client completion future of a force-cancelled job must resolve to "
                             + "CANCELED");
+            Assertions.assertFalse(
+                    ForceCancelBlockingSink.hasExitedWrite(),
+                    "The parked writer must still be held when the client completion future "
+                            + "resolves");
 
             // 4. Every fixed slot must be back in the pool: the pipeline's slot ownership record
             // must be gone and a job that needs the whole pool must be able to start.
@@ -282,10 +403,52 @@ public class ForceCancelUnresponsiveTaskIT {
                                             probeJobProxy.getJobStatus(),
                                             "The capacity probe job must cancel cleanly"));
 
-            // 5. Finally let the parked writer go: the already terminal job must not revive or
-            // change state, and the task can now finish so the in-process node can shut down.
+            // 5. Once the job is terminal the coordinator releases the JobMaster, after which the
+            // client is served from finished-job history. That lookup must still answer CANCELED,
+            // not UNKNOWABLE and not a stale live state.
+            Awaitility.await()
+                    .atMost(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .pollInterval(200, TimeUnit.MILLISECONDS)
+                    .untilAsserted(
+                            () ->
+                                    Assertions.assertNull(
+                                            seaTunnelServer
+                                                    .getCoordinatorService()
+                                                    .getJobMaster(jobId),
+                                            "The coordinator must release the JobMaster of the "
+                                                    + "force-cancelled terminal job, so the next "
+                                                    + "status read comes from finished history"));
+            Assertions.assertEquals(
+                    JobStatus.CANCELED,
+                    jobProxy.getJobStatus(),
+                    "The terminal state of the force-cancelled job must remain readable from "
+                            + "finished-job history after the JobMaster is released");
+
+            // 6. Finally let the parked writer go: wait for it to leave write() and for the worker
+            // task-group teardown, then check that the already terminal job did not revive or
+            // change state when the late worker callback ran.
             ForceCancelBlockingSink.release();
-            Thread.sleep(3000L);
+            Awaitility.await()
+                    .atMost(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .pollInterval(50, TimeUnit.MILLISECONDS)
+                    .untilAsserted(
+                            () ->
+                                    Assertions.assertTrue(
+                                            ForceCancelBlockingSink.hasExitedWrite(),
+                                            "Releasing the gate must make the parked write() call "
+                                                    + "return"));
+            Awaitility.await()
+                    .atMost(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .pollInterval(200, TimeUnit.MILLISECONDS)
+                    .untilAsserted(
+                            () ->
+                                    Assertions.assertFalse(
+                                            hasActiveTaskGroup(
+                                                    taskExecutionService, fixtureTaskGroups),
+                                            "The worker must tear down the task group of the "
+                                                    + "released writer before the test concludes "
+                                                    + "the job state; a lingering context means "
+                                                    + "the teardown never ran"));
             Assertions.assertEquals(
                     JobStatus.CANCELED,
                     jobProxy.getJobStatus(),
@@ -299,5 +462,21 @@ public class ForceCancelUnresponsiveTaskIT {
                 node.shutdown();
             }
         }
+    }
+
+    /** True while any of the given task groups still has an execution context on the worker. */
+    private static boolean hasActiveTaskGroup(
+            TaskExecutionService taskExecutionService, List<TaskGroupLocation> taskGroupLocations) {
+        for (TaskGroupLocation location : taskGroupLocations) {
+            try {
+                if (taskExecutionService.getActiveExecutionContext(location) != null) {
+                    return true;
+                }
+            } catch (TaskGroupContextNotFoundException e) {
+                // No active deployment for this location is exactly what a torn-down task group
+                // looks like on the worker.
+            }
+        }
+        return false;
     }
 }
