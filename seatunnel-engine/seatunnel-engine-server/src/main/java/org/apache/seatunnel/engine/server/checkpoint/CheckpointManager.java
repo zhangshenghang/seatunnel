@@ -187,12 +187,24 @@ public class CheckpointManager {
                                             }
                                             if (pipelineState != null) {
                                                 long checkpointId = pipelineState.getCheckpointId();
-                                                idCounter.setCount(checkpointId + 1);
+                                                // A checkpoint that was in flight when the previous
+                                                // master died already consumed an id from the
+                                                // shared counter, and that increment is persisted.
+                                                // Rewinding the counter to checkpointId + 1 would
+                                                // re-issue that id; acknowledgements are matched by
+                                                // id only, so a late acknowledgement for the
+                                                // interrupted barrier could complete the new
+                                                // checkpoint with state from two different
+                                                // barriers. Never move the counter backwards.
+                                                long nextCheckpointId =
+                                                        Math.max(idCounter.get(), checkpointId + 1);
+                                                idCounter.setCount(nextCheckpointId);
                                                 log.info(
-                                                        "pipeline({}) restore with {} on checkpointId({})",
+                                                        "pipeline({}) restore with {} on checkpointId({}), next checkpointId({})",
                                                         plan.getPipelineId(),
                                                         restoreMode,
-                                                        checkpointId);
+                                                        checkpointId,
+                                                        nextCheckpointId);
                                             }
                                         }
                                         return new CheckpointCoordinator(

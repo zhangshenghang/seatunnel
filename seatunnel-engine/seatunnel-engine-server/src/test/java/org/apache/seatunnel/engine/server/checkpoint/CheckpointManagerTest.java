@@ -158,6 +158,42 @@ public class CheckpointManagerTest extends AbstractSeaTunnelServerTest {
     }
 
     @Test
+    public void testMasterFailoverRestoreMustNotReuseInFlightCheckpointId() throws Exception {
+        long jobId = (long) (Math.random() * 1000000L);
+        CheckpointStorage checkpointStorage = createCheckpointStorage();
+        storeCompletedCheckpoint(checkpointStorage, jobId, 1L);
+
+        // Checkpoint 2 was triggered before the old master died, so the shared counter already
+        // advanced to 3 even though checkpoint 2 never completed. Restoring the coordinator must
+        // not move the counter backwards and re-issue id 2: acknowledgements are matched by id
+        // only, so a late acknowledgement for the interrupted barrier could complete the new
+        // checkpoint with state from two different barriers.
+        CounterStateStore<String> checkpointCounterStore =
+                server.getEngineContext().getStateStores().checkpointCounterStore();
+        String counterKey = StateStoreCheckpointIDCounter.convertLongIntToBase64(jobId, 1);
+        checkpointCounterStore.set(counterKey, 3L);
+
+        CheckpointManager checkpointManager =
+                createCheckpointManager(
+                        jobId,
+                        true,
+                        RestoreMode.NONE,
+                        null,
+                        true,
+                        checkpointStorage,
+                        new CheckpointConfig());
+
+        Assertions.assertEquals(
+                3L, checkpointManager.getCheckpointCoordinator(1).getCheckpointIdCounter().get());
+        Assertions.assertEquals(
+                3L,
+                checkpointManager
+                        .getCheckpointCoordinator(1)
+                        .getCheckpointIdCounter()
+                        .getAndIncrement());
+    }
+
+    @Test
     public void testMasterFailoverRestoreShouldPreferOwnLatestCheckpointOverSavepoint()
             throws Exception {
         long jobId = (long) (Math.random() * 1000000L);
