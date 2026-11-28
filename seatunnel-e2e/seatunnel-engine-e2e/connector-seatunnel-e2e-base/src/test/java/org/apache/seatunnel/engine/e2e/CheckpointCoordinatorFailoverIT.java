@@ -296,6 +296,18 @@ public class CheckpointCoordinatorFailoverIT {
      * window. BATCH mode and the omitted {@code checkpoint.interval} stay as they are, because the
      * disabled-checkpoint precondition depends on them.
      *
+     * <p><b>How the coordinator takeover is observed.</b> Neither a {@code RUNNING} job status nor
+     * growing source metrics prove that the new master has restored the pipeline: {@code
+     * CoordinatorService} publishes the restored {@code JobMaster} before its takeover task runs,
+     * and the surviving worker keeps emitting rows independently of the new master. The test
+     * therefore waits for the job's {@code RUNNING} state timestamp to advance past its
+     * pre-failover value, which only happens after the takeover task has restored every pipeline
+     * ({@code SubPlan#restorePipelineState} -&gt; {@code
+     * CheckpointCoordinator#restoreCoordinator(true)}) and called {@code JobMaster#run}. It also
+     * asserts that every task group of the restored pipeline is still {@code RUNNING}, i.e. that
+     * the restore really used the {@code alreadyStarted} branch, and only then samples the absence
+     * of checkpoints over several engine default intervals.
+     *
      * <p>See <a href="https://github.com/apache/seatunnel/issues/13497">#13497</a>.
      */
     @Test
@@ -376,6 +388,17 @@ public class CheckpointCoordinatorFailoverIT {
             Thread.sleep(3 * ENGINE_DEFAULT_CHECKPOINT_INTERVAL_MS);
             assertNoJobCheckpoint(masterNode1, jobId, "on the healthy master");
 
+            // Remember when the healthy master last entered RUNNING. The surviving master rewrites
+            // this timestamp only after its takeover task has restored every pipeline (see
+            // awaitCoordinatorTakeover), so a later value is the proof that the restore ran.
+            Long runningTimestampBeforeFailover =
+                    getJobMaster(masterNode1, jobId)
+                            .getPhysicalPlan()
+                            .getStateTimestamp(JobStatus.RUNNING);
+            Assertions.assertNotNull(
+                    runningTimestampBeforeFailover,
+                    "The running job must have a persisted RUNNING state timestamp");
+
             log.info(
                     "Checkpoint-disabled batch job {} is RUNNING with {} rows emitted by the gated"
                             + " source and no checkpoint. Triggering master failover by shutting"
@@ -397,6 +420,18 @@ public class CheckpointCoordinatorFailoverIT {
                                     Assertions.assertEquals(
                                             2, finalMaster2.getCluster().getMembers().size()));
 
+            // CoordinatorService publishes the restored JobMaster in runningJobMasterMap before its
+            // takeover task restores the pipelines, so at this point the job master, its checkpoint
+            // manager and its checkpoint coordinator already exist even though
+            // SubPlan#restorePipelineState - and with it
+            // CheckpointCoordinator#restoreCoordinator(alreadyStarted) - has not run yet. Wait for
+            // the restore to complete before opening the absence window below.
+            awaitCoordinatorTakeover(masterNode2, jobId, runningTimestampBeforeFailover);
+            // The regression only exists on the alreadyStarted restore path, which the engine
+            // selects from the task states the surviving worker still reports. Assert that the
+            // restore really took that branch instead of rescheduling the pipeline.
+            assertAlreadyStartedRestoreBranchObserved(masterNode2, jobId);
+
             Awaitility.await()
                     .atMost(3, TimeUnit.MINUTES)
                     .pollInterval(1, TimeUnit.SECONDS)
@@ -404,8 +439,9 @@ public class CheckpointCoordinatorFailoverIT {
                             () ->
                                     Assertions.assertEquals(
                                             JobStatus.RUNNING, jobProxy.getJobStatus()));
-            // The restored job must resume producing rows on the surviving worker; this also
-            // proves the new coordinator reached the alreadyStarted restore path.
+            // The restored job must resume producing rows on the surviving worker. This is task
+            // liveness only: the worker emits independently of the new master, so it does not prove
+            // that the new coordinator reached the alreadyStarted restore path.
             Awaitility.await()
                     .atMost(3, TimeUnit.MINUTES)
                     .pollInterval(1, TimeUnit.SECONDS)
@@ -417,9 +453,10 @@ public class CheckpointCoordinatorFailoverIT {
                                             "Waiting for the restored source to resume emitting"
                                                     + " rows"));
 
-            // Observe several engine default intervals on the new master. A periodic checkpoint
-            // triggered by restoreCoordinator would advance the id counter immediately and persist
-            // a checkpoint within this window.
+            // The takeover has returned by now, so a periodic checkpoint wrongly triggered from the
+            // restore path would already have advanced the id counter and persisted a checkpoint;
+            // observing several engine default intervals on the new master also catches a follow-up
+            // trigger scheduled from the engine default interval.
             long observationDeadline =
                     System.currentTimeMillis() + 5 * ENGINE_DEFAULT_CHECKPOINT_INTERVAL_MS;
             while (System.currentTimeMillis() < observationDeadline) {
@@ -529,6 +566,100 @@ public class CheckpointCoordinatorFailoverIT {
         TestUtils.createTestConfigFileFromTemplate(
                 CHECKPOINT_DISABLED_BATCH_CONF, valueMap, targetConfigFilePath);
         return targetConfigFilePath;
+    }
+
+    /**
+     * Waits until the surviving master has finished taking over the job's pipeline and its
+     * checkpoint coordinator.
+     *
+     * <p>{@code CoordinatorService} publishes the restored {@link JobMaster} in its running map
+     * before it submits the takeover task, so the job master, its checkpoint manager and a
+     * checkpoint coordinator for every pipeline all exist before {@code
+     * SubPlan#restorePipelineState} - and therefore {@code
+     * CheckpointCoordinator#restoreCoordinator} - has run: neither a {@code RUNNING} job status nor
+     * growing task metrics prove that the restore entry point was reached. The takeover task
+     * restores every pipeline synchronously and only then calls {@code JobMaster#run}, whose {@code
+     * PhysicalPlan#startJob} moves the job through {@code SCHEDULED} back to {@code RUNNING} and
+     * rewrites the job's {@code RUNNING} state timestamp. Waiting for that timestamp to advance
+     * past its pre-failover value therefore proves the restore returned before the absence window
+     * opens.
+     *
+     * @param newMaster the surviving master that must take the job over
+     * @param jobId id of the restored job
+     * @param runningTimestampBeforeFailover {@code RUNNING} state timestamp read from the master
+     *     that was killed
+     */
+    private static void awaitCoordinatorTakeover(
+            HazelcastInstanceImpl newMaster, long jobId, long runningTimestampBeforeFailover) {
+        Awaitility.await()
+                .atMost(3, TimeUnit.MINUTES)
+                .pollInterval(200, TimeUnit.MILLISECONDS)
+                .untilAsserted(
+                        () -> {
+                            JobMaster jobMaster = getJobMaster(newMaster, jobId);
+                            Assertions.assertNotNull(
+                                    jobMaster,
+                                    "The surviving master must publish the restored job master");
+                            Long runningTimestamp =
+                                    jobMaster
+                                            .getPhysicalPlan()
+                                            .getStateTimestamp(JobStatus.RUNNING);
+                            Assertions.assertTrue(
+                                    runningTimestamp != null
+                                            && runningTimestamp > runningTimestampBeforeFailover,
+                                    String.format(
+                                            "Waiting for the new master to restore the pipeline and"
+                                                    + " its checkpoint coordinator; the job's"
+                                                    + " RUNNING state timestamp must advance past"
+                                                    + " its pre-failover value (before=%d, now=%s)",
+                                            runningTimestampBeforeFailover, runningTimestamp));
+                        });
+    }
+
+    /**
+     * Asserts that the restore took the {@code alreadyStarted} branch the regression targets.
+     *
+     * <p>{@code SubPlan#restorePipelineState} passes {@code alreadyStarted == true} to {@code
+     * CheckpointCoordinator#restoreCoordinator} only while {@code
+     * SubPlan#isCheckpointCoordinatorAlreadyStarted()} accepts the pipeline: every coordinator
+     * (source starting) task group and every physical task group is still running on the surviving
+     * worker. This fixture keeps that worker alive across the fault, so those states must still be
+     * {@link ExecutionState#RUNNING} right after the takeover. If the pipeline had been rescheduled
+     * instead, the restore would have taken the {@code alreadyStarted == false} branch and this
+     * test would not exercise the disabled-checkpoint restore path at all.
+     */
+    private static void assertAlreadyStartedRestoreBranchObserved(
+            HazelcastInstanceImpl newMaster, long jobId) {
+        JobMaster jobMaster = getJobMaster(newMaster, jobId);
+        Assertions.assertNotNull(jobMaster, "The surviving master must publish the restored job");
+        jobMaster
+                .getPhysicalPlan()
+                .getPipelineList()
+                .forEach(
+                        pipeline -> {
+                            assertAllRunning(pipeline.getCoordinatorVertexList(), "coordinator");
+                            assertAllRunning(pipeline.getPhysicalVertexList(), "physical");
+                        });
+    }
+
+    /** Asserts that every task group of the restored pipeline still runs on the worker. */
+    private static void assertAllRunning(List<PhysicalVertex> vertices, String kind) {
+        Assertions.assertFalse(
+                vertices.isEmpty(), "A restored pipeline must still have " + kind + " task groups");
+        vertices.forEach(
+                vertex ->
+                        Assertions.assertEquals(
+                                ExecutionState.RUNNING,
+                                vertex.getExecutionState(),
+                                () ->
+                                        "The "
+                                                + kind
+                                                + " task group "
+                                                + vertex.getTaskGroupLocation()
+                                                + " must still be running on the surviving worker;"
+                                                + " otherwise the restore rescheduled the pipeline"
+                                                + " instead of taking the alreadyStarted branch"
+                                                + " under test"));
     }
 
     /**
