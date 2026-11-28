@@ -75,8 +75,8 @@ import java.util.concurrent.TimeUnit;
  * <p>After the release, the held checkpoint must complete exactly once and the trigger chain must
  * still be alive: a later checkpoint with a strictly greater id must complete, ids must never be
  * reused, and the job must stay {@code RUNNING}. Finally, cancelling the job must reach {@code
- * CANCELED}, stop the scheduler (no snapshot call after the terminal state) and release the
- * pipeline's fixed slots.
+ * CANCELED}, release the pipeline's fixed slots and leave the sink without further snapshot
+ * requests once the terminal state has settled.
  *
  * <p>Why this boundary has real regression risk: the single-flight decision is one {@code
  * pendingCounter > 0} branch in {@code CheckpointCoordinator#tryTriggerPendingCheckpoint}. If it
@@ -115,6 +115,12 @@ public class CheckpointSingleFlightIT {
     private static final long POLL_INTERVAL_MILLIS = 100L;
     private static final long JOB_START_TIMEOUT_SECONDS = 120L;
     private static final long CHECKPOINT_PROGRESS_TIMEOUT_SECONDS = 60L;
+
+    /**
+     * Upper bound for the cancellation wait, so a job that never reaches a terminal state fails
+     * this test instead of blocking until the external CI job timeout.
+     */
+    private static final long TERMINAL_STATUS_TIMEOUT_SECONDS = 60L;
 
     @Test
     public void testSlowCheckpointStaysSingleFlightAndKeepsTheTriggerChainAlive() throws Exception {
@@ -309,18 +315,22 @@ public class CheckpointSingleFlightIT {
                         "checkpoint ids must strictly increase, got " + finalSnapshotIds);
             }
 
-            // 6. Cancelling must reach CANCELED, stop the scheduler and release the pipeline's
-            //    fixed slot ownership.
+            // 6. Cancelling must reach CANCELED and release the pipeline's fixed slot ownership.
+            //    The wait is bounded so a cancellation regression fails here instead of blocking on
+            //    the completion future until the CI job times out.
             jobProxy.cancelJob();
-            Assertions.assertEquals(JobStatus.CANCELED, jobProxy.waitForJobComplete());
+            awaitJobStatus(jobProxy, JobStatus.CANCELED);
+            //    The snapshot count is sampled at the sink, so it establishes the absence of
+            //    post-terminal sink snapshot requests; the coordinator-owned scheduler executor is
+            //    not observed here.
             Thread.sleep(TERMINAL_SETTLE_MILLIS);
             int snapshotCallsAfterDrain = CheckpointSingleFlightSink.snapshotCallCount();
             Thread.sleep(TimeUnit.MILLISECONDS.toMillis(CHECKPOINT_INTERVAL_MS * 3));
             Assertions.assertEquals(
                     snapshotCallsAfterDrain,
                     CheckpointSingleFlightSink.snapshotCallCount(),
-                    "the checkpoint scheduler must not trigger another checkpoint after the job "
-                            + "reached its terminal state, snapshots="
+                    "the sink must not be asked for another snapshot after the job reached its "
+                            + "terminal state, snapshots="
                             + CheckpointSingleFlightSink.snapshotIds());
 
             IMap<PipelineLocation, Map<TaskGroupLocation, SlotProfile>> ownedSlotProfiles =
@@ -391,6 +401,25 @@ public class CheckpointSingleFlightIT {
 
     private interface PipelineAssertion {
         void check(PipelineCheckpointOverview pipeline);
+    }
+
+    /**
+     * Waits for the job to reach {@code expectedStatus} within a bounded time.
+     *
+     * <p>{@link ClientJobProxy#waitForJobComplete()} blocks on the client completion future without
+     * a timeout, so a regression that leaves it unresolved would stall this test until the external
+     * CI timeout instead of failing it here.
+     */
+    private static void awaitJobStatus(ClientJobProxy jobProxy, JobStatus expectedStatus) {
+        Awaitility.await()
+                .atMost(TERMINAL_STATUS_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .pollInterval(POLL_INTERVAL_MILLIS, TimeUnit.MILLISECONDS)
+                .untilAsserted(
+                        () ->
+                                Assertions.assertEquals(
+                                        expectedStatus,
+                                        jobProxy.getJobStatus(),
+                                        "the job must reach " + expectedStatus));
     }
 
     private static void awaitOverview(
