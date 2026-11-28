@@ -27,6 +27,9 @@ import org.apache.seatunnel.engine.common.config.JobConfig;
 import org.apache.seatunnel.engine.common.config.SeaTunnelConfig;
 import org.apache.seatunnel.engine.common.config.server.ScheduleStrategy;
 import org.apache.seatunnel.engine.common.job.JobStatus;
+import org.apache.seatunnel.engine.core.checkpoint.CheckpointHistoryEntry;
+import org.apache.seatunnel.engine.core.checkpoint.CheckpointInfo;
+import org.apache.seatunnel.engine.core.checkpoint.CheckpointStatus;
 import org.apache.seatunnel.engine.core.checkpoint.CheckpointType;
 import org.apache.seatunnel.engine.core.job.JobPipelineCheckpointData;
 import org.apache.seatunnel.engine.core.job.RestoreMode;
@@ -55,9 +58,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 /**
  * End-to-end guard for the capacity-admission boundary of a savepoint restore.
@@ -123,6 +131,26 @@ public class SavepointRestoreCapacityAdmissionIT {
 
     private static final long STATE_TIMEOUT_SECONDS = 180;
 
+    /**
+     * Deadline for a client cancel that blocks on a remote join. The join does not observe
+     * interruption, so a stuck call is bounded by this deadline and then dropped together with the
+     * client and member that own it.
+     */
+    private static final long CANCEL_TIMEOUT_SECONDS = 120;
+
+    /** Upper bound on the monitor history read when looking for the first post-restore entry. */
+    private static final int CHECKPOINT_HISTORY_LIMIT = 200;
+
+    /**
+     * Orders checkpoint monitor history entries by when they were triggered, so the oracle below
+     * observes the earliest checkpoint produced after admission instead of the latest one.
+     */
+    private static final Comparator<CheckpointHistoryEntry> TRIGGER_ORDER =
+            Comparator.comparingLong(
+                            (CheckpointHistoryEntry entry) ->
+                                    entry.getCheckpointInfo().getTriggerTimestamp())
+                    .thenComparingLong(entry -> entry.getCheckpointInfo().getCheckpointId());
+
     @Test
     public void testSavepointRestoreWaitsForCapacityAndResumes() throws Exception {
         String testCaseName = "testSavepointRestoreWaitsForCapacityAndResumes";
@@ -133,6 +161,17 @@ public class SavepointRestoreCapacityAdmissionIT {
         ClientJobProxy sourceJob = null;
         ClientJobProxy occupyingJob = null;
         ClientJobProxy restoredJob = null;
+        // Owns every blocking client call this test bounds. A call that misses its deadline stays
+        // on this executor and is dropped with the client/member instead of leaking on the common
+        // pool, where it could outlive the test.
+        ExecutorService clientCallExecutor =
+                Executors.newCachedThreadPool(
+                        runnable -> {
+                            Thread thread =
+                                    new Thread(runnable, "savepoint-restore-admission-client-call");
+                            thread.setDaemon(true);
+                            return thread;
+                        });
 
         try {
             SeaTunnelConfig seaTunnelConfig = ConfigProvider.locateAndGetSeaTunnelConfig();
@@ -179,7 +218,7 @@ public class SavepointRestoreCapacityAdmissionIT {
             awaitOwnsSlices(resourceManager, workerAddress, jobId, SLOTS_PER_JOB);
             awaitCompletedCheckpoints(checkpointMonitor, jobId, 1L);
 
-            long savepointId = takeSavepoint(engineClient, jobClient, jobId);
+            long savepointId = takeSavepoint(clientCallExecutor, engineClient, jobClient, jobId);
             awaitStatus(coordinatorService, jobId, JobStatus.SAVEPOINT_DONE);
 
             // A restore is only meaningful once the savepointed run has fully left the running map;
@@ -282,8 +321,19 @@ public class SavepointRestoreCapacityAdmissionIT {
                                         "a pending restore must not start checkpoints");
                             });
 
+            // Snapshot the completed checkpoints that already exist, so the post-restore
+            // observation can tell a checkpoint of the restored run from one of the savepointed
+            // run: the restore reuses the source job id, so the monitor history still holds it.
+            Set<String> completedHistoryBeforeRestore =
+                    completedCheckpointHistoryKeys(checkpointMonitor, jobId);
+
             // ---- Phase 4: free the pool; the pending restore must be dispatched onto it.
-            occupyingJob.cancelJob();
+            final ClientJobProxy occupierToCancel = occupyingJob;
+            runBounded(
+                    clientCallExecutor,
+                    "cancel of the occupying job " + occupyingJobId,
+                    CANCEL_TIMEOUT_SECONDS,
+                    occupierToCancel::cancelJob);
             occupyingJob = null;
             awaitStatus(coordinatorService, occupyingJobId, JobStatus.CANCELED);
             awaitStatus(coordinatorService, jobId, JobStatus.RUNNING);
@@ -293,22 +343,28 @@ public class SavepointRestoreCapacityAdmissionIT {
                     "the cancelled occupying job must own no slice");
 
             // ---- Phase 5: the restored run must resume the savepoint checkpoint chain.
-            JobPipelineCheckpointData firstPostRestore =
-                    awaitCheckpoint(
-                            jobClient,
+            CheckpointHistoryEntry firstPostRestore =
+                    awaitFirstPostRestoreCheckpoint(
+                            checkpointMonitor,
                             jobId,
-                            RestoreMode.CHECKPOINT,
-                            savepointId,
+                            completedHistoryBeforeRestore,
                             "periodic checkpoint after the restore");
+            long firstPostRestoreId = firstPostRestore.getCheckpointInfo().getCheckpointId();
             Assertions.assertTrue(
-                    firstPostRestore.getCheckpointId() > savepointId,
-                    "the restored run must continue after the savepoint id, savepoint="
+                    firstPostRestoreId > savepointId,
+                    "the first checkpoint completed by the restored run must continue after the"
+                            + " savepoint id: savepoint="
                             + savepointId
-                            + ", first periodic="
-                            + firstPostRestore.getCheckpointId());
+                            + ", first completed="
+                            + firstPostRestoreId);
+            log.info(
+                    "Job {}: savepoint id {}, first checkpoint completed by the restored run {}",
+                    jobId,
+                    savepointId,
+                    firstPostRestoreId);
             Assertions.assertEquals(
                     CheckpointType.CHECKPOINT_TYPE,
-                    firstPostRestore.getCheckpointType(),
+                    firstPostRestore.getCheckpointInfo().getCheckpointType(),
                     "the first checkpoint after the restore must be a periodic checkpoint");
 
             // The savepoint stays selectable: it is the only durable recovery point of this job.
@@ -324,7 +380,12 @@ public class SavepointRestoreCapacityAdmissionIT {
                     "the restored run must not overwrite the savepoint id");
 
             // ---- Phase 6: the restored job ends and the fixed pool becomes fully free.
-            restoredJob.cancelJob();
+            final ClientJobProxy restoredToCancel = restoredJob;
+            runBounded(
+                    clientCallExecutor,
+                    "cancel of the restored job " + jobId,
+                    CANCEL_TIMEOUT_SECONDS,
+                    restoredToCancel::cancelJob);
             restoredJob = null;
             awaitStatus(coordinatorService, jobId, JobStatus.CANCELED);
 
@@ -346,14 +407,27 @@ public class SavepointRestoreCapacityAdmissionIT {
                                         "the whole fixed pool must be unassigned again");
                             });
         } finally {
-            cancelQuietly(sourceJob);
-            cancelQuietly(occupyingJob);
-            cancelQuietly(restoredJob);
-            if (engineClient != null) {
-                engineClient.close();
-            }
-            if (node != null) {
-                node.shutdown();
+            // Every teardown step is bounded and independent: a stuck or throwing cancel, client
+            // close or member shutdown must not keep the remaining steps from running.
+            cancelQuietly(clientCallExecutor, "source job", sourceJob);
+            cancelQuietly(clientCallExecutor, "occupying job", occupyingJob);
+            cancelQuietly(clientCallExecutor, "restored job", restoredJob);
+            try {
+                if (engineClient != null) {
+                    engineClient.close();
+                }
+            } catch (Throwable e) {
+                log.warn("Ignoring client close failure during teardown", e);
+            } finally {
+                try {
+                    if (node != null) {
+                        node.shutdown();
+                    }
+                } catch (Throwable e) {
+                    log.warn("Ignoring member shutdown failure during teardown", e);
+                } finally {
+                    shutdownExecutorQuietly(clientCallExecutor);
+                }
             }
         }
     }
@@ -374,11 +448,17 @@ public class SavepointRestoreCapacityAdmissionIT {
      * The client call blocks until the job reaches a terminal state, so it is bounded here to keep
      * a stuck {@code DOING_SAVEPOINT} from hanging the suite.
      */
-    private static long takeSavepoint(SeaTunnelClient engineClient, JobClient jobClient, long jobId)
+    private static long takeSavepoint(
+            ExecutorService clientCallExecutor,
+            SeaTunnelClient engineClient,
+            JobClient jobClient,
+            long jobId)
             throws Exception {
-        CompletableFuture<Void> savepoint =
-                CompletableFuture.runAsync(() -> engineClient.savePointJob(jobId));
-        savepoint.get(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        runBounded(
+                clientCallExecutor,
+                "savepoint of job " + jobId,
+                STATE_TIMEOUT_SECONDS,
+                () -> engineClient.savePointJob(jobId));
 
         AtomicReference<JobPipelineCheckpointData> persisted = new AtomicReference<>();
         Awaitility.await()
@@ -409,41 +489,70 @@ public class SavepointRestoreCapacityAdmissionIT {
         return persisted.get().getCheckpointId();
     }
 
-    private static JobPipelineCheckpointData awaitCheckpoint(
-            JobClient jobClient,
+    /**
+     * Waits for the first checkpoint <em>completed by the restored run</em> and returns it.
+     *
+     * <p>The caller snapshots the completed checkpoints that already exist before admission,
+     * because a restore reuses the source job id and the monitor history still holds the
+     * savepointed run. Only entries whose identity is absent from that baseline are candidates, and
+     * the candidate with the earliest trigger timestamp is returned. Waiting for a maximum instead
+     * would accept a reset id counter: it can climb from 1 past the savepoint id within the poll
+     * budget and look like a continuation.
+     */
+    private static CheckpointHistoryEntry awaitFirstPostRestoreCheckpoint(
+            CheckpointMonitorService checkpointMonitor,
             long jobId,
-            RestoreMode restoreMode,
-            long minExclusiveCheckpointId,
+            Set<String> completedHistoryBeforeRestore,
             String description) {
-        AtomicReference<JobPipelineCheckpointData> latest = new AtomicReference<>();
+        AtomicReference<CheckpointHistoryEntry> first = new AtomicReference<>();
         Awaitility.await()
                 .atMost(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .pollInterval(500, TimeUnit.MILLISECONDS)
+                .pollInterval(200, TimeUnit.MILLISECONDS)
                 .untilAsserted(
                         () -> {
-                            List<JobPipelineCheckpointData> checkpoints =
-                                    jobClient.getCheckpointData(jobId, restoreMode);
-                            JobPipelineCheckpointData newest =
-                                    checkpoints.stream()
-                                            .filter(data -> data.getPipelineId() == PIPELINE_ID)
-                                            .max(
-                                                    Comparator.comparingLong(
-                                                            JobPipelineCheckpointData
-                                                                    ::getCheckpointId))
+                            List<CheckpointHistoryEntry> completed =
+                                    checkpointHistory(
+                                            checkpointMonitor, jobId, CheckpointStatus.COMPLETED);
+                            CheckpointHistoryEntry earliest =
+                                    completed.stream()
+                                            .filter(
+                                                    entry ->
+                                                            !completedHistoryBeforeRestore.contains(
+                                                                    historyKey(entry)))
+                                            .min(TRIGGER_ORDER)
                                             .orElse(null);
                             Assertions.assertNotNull(
-                                    newest, "no " + restoreMode + " checkpoint for " + description);
-                            Assertions.assertTrue(
-                                    newest.getCheckpointId() > minExclusiveCheckpointId,
-                                    "waiting for a "
-                                            + description
-                                            + " above id "
-                                            + minExclusiveCheckpointId
-                                            + " but the latest is "
-                                            + newest.getCheckpointId());
-                            latest.set(newest);
+                                    earliest, "no completed " + description + ": " + completed);
+                            first.set(earliest);
                         });
-        return latest.get();
+        return first.get();
+    }
+
+    /**
+     * Keys a checkpoint monitor history entry on the fields that identify the produced checkpoint,
+     * so entries from the savepointed run can be excluded from the post-restore observation.
+     */
+    private static String historyKey(CheckpointHistoryEntry entry) {
+        CheckpointInfo info = entry.getCheckpointInfo();
+        return info.getCheckpointId()
+                + "/"
+                + info.getTriggerTimestamp()
+                + "/"
+                + info.getCheckpointType()
+                + "/"
+                + info.getStatus();
+    }
+
+    private static Set<String> completedCheckpointHistoryKeys(
+            CheckpointMonitorService checkpointMonitor, long jobId) {
+        return checkpointHistory(checkpointMonitor, jobId, CheckpointStatus.COMPLETED).stream()
+                .map(SavepointRestoreCapacityAdmissionIT::historyKey)
+                .collect(Collectors.toSet());
+    }
+
+    private static List<CheckpointHistoryEntry> checkpointHistory(
+            CheckpointMonitorService checkpointMonitor, long jobId, CheckpointStatus status) {
+        return checkpointMonitor.getHistory(jobId, PIPELINE_ID, CHECKPOINT_HISTORY_LIMIT, status);
     }
 
     private static void awaitStatus(
@@ -539,17 +648,69 @@ public class SavepointRestoreCapacityAdmissionIT {
                 .getOrDefault(jobId, Collections.emptySet());
     }
 
-    private static void cancelQuietly(ClientJobProxy jobProxy) {
+    /**
+     * Runs a blocking client call on the test-owned executor and bounds the wait.
+     *
+     * <p>{@code ClientJobProxy} and {@code SeaTunnelClient} block on remote joins that do not
+     * observe interruption, so a timed-out task cannot be unwound by cancelling its future. The
+     * task therefore stays owned by {@code clientCallExecutor} and is released when the client and
+     * member it waits on are torn down after the test, never abandoned on a shared pool.
+     */
+    private static void runBounded(
+            ExecutorService clientCallExecutor,
+            String description,
+            long timeoutSeconds,
+            Runnable call)
+            throws Exception {
+        Future<?> future = clientCallExecutor.submit(call);
+        try {
+            future.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw new AssertionError(
+                    description + " did not finish within " + timeoutSeconds + "s", e);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw e;
+        }
+    }
+
+    private static void cancelQuietly(
+            ExecutorService clientCallExecutor, String description, ClientJobProxy jobProxy) {
         if (jobProxy == null) {
             return;
         }
         try {
-            jobProxy.cancelJob();
+            runBounded(
+                    clientCallExecutor,
+                    "cleanup cancel of the " + description,
+                    CANCEL_TIMEOUT_SECONDS,
+                    jobProxy::cancelJob);
         } catch (Throwable e) {
             log.info(
-                    "Ignoring failure while cancelling job {} during cleanup",
+                    "Ignoring failure while cancelling job {} ({}) during cleanup",
                     jobProxy.getJobId(),
+                    description,
                     e);
+        }
+    }
+
+    private static void shutdownExecutorQuietly(ExecutorService clientCallExecutor) {
+        clientCallExecutor.shutdownNow();
+        try {
+            if (!clientCallExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                log.warn(
+                        "Bounded client call executor did not terminate within 5s; "
+                                + "its remaining tasks are blocked on the already closed client");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 }
