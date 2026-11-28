@@ -80,10 +80,16 @@ import java.util.stream.Collectors;
  *
  * <p><b>How the failure is produced.</b> The streaming job uses {@code job.retry.times = 2}, so it
  * must be attempted three times (the initial deployment plus two pipeline restores). The test-only
- * {@code ArmableFailingSink} accepts rows while it is not armed, which lets the pipeline reach a
- * steady {@code RUNNING} state and complete a real checkpoint, and fails every row once the test
- * arms it. {@code ArmableFailingSinkWriter#WRITER_INSTANCES} counts deployments, which is the
- * observable retry budget.
+ * {@code ArmableFailingSink} accepts rows and checkpoints while it is not armed, which lets the
+ * pipeline reach a steady {@code RUNNING} state and complete a real checkpoint; once the test arms
+ * it, the writer fails the next lifecycle event it processes. The fixture's {@code FakeSource} is
+ * finite (it emits {@code row.num} rows over {@code split.num} splits) and merely stays open in
+ * {@code STREAMING} mode after those rows are drained, so the injection must not depend on a row
+ * still arriving: the writer fails {@code prepareCommit()} as well, and the periodic checkpoint
+ * barriers keep reaching the sink for the whole life of the streaming job, on the current attempt
+ * and on every restored attempt. That makes the failure deterministic per deployment instead of a
+ * race against the source's remaining rows. {@code ArmableFailingSinkWriter#WRITER_INSTANCES}
+ * counts deployments, which is the observable retry budget.
  */
 @Slf4j
 public class PermanentFailureCapacityReleaseIT {
@@ -139,6 +145,9 @@ public class PermanentFailureCapacityReleaseIT {
             String confPath = TestUtils.getResource(CONF_FILE);
 
             engineClient = new SeaTunnelClient(clientConfig);
+            // The client local is assigned in this try and closed in the finally block, so it is
+            // not effectively final; the terminal-window poll below captures this alias instead.
+            final SeaTunnelClient statusClient = engineClient;
             JobClient jobClient = engineClient.createJobClient();
 
             ArmableFailingSinkWriter.reset();
@@ -157,8 +166,11 @@ public class PermanentFailureCapacityReleaseIT {
                     jobId,
                     checkpoint.getCheckpointId());
 
-            // From here on every row fails, so the current attempt fails, the two retries are
-            // consumed and the job must end FAILED.
+            // From here on the writer fails its next lifecycle event, so the current attempt fails,
+            // the two retries are consumed and the job must end FAILED. Arming after a completed
+            // checkpoint keeps the checkpoint-before-failure precondition, and because the failure
+            // also fires from prepareCommit() it cannot be missed just because the finite source
+            // already stopped producing rows.
             ArmableFailingSinkWriter.ARMED.set(true);
             awaitJobStatus(job, JobStatus.FAILED);
 
@@ -167,21 +179,28 @@ public class PermanentFailureCapacityReleaseIT {
                     ArmableFailingSinkWriter.WRITER_INSTANCES.get(),
                     "job.retry.times=2 must allow exactly two restores, i.e. three deployments");
 
-            // FAILED must be terminal: no further deployment and no state change after a window
-            // that is much longer than the job's 1s retry interval.
-            TimeUnit.SECONDS.sleep(TERMINAL_STABILITY_SECONDS);
-            Assertions.assertEquals(
-                    JobStatus.FAILED,
-                    job.getJobStatus(),
-                    "A permanently failed job must stay FAILED instead of restarting");
-            Assertions.assertEquals(
-                    EXPECTED_DEPLOYMENTS,
-                    ArmableFailingSinkWriter.WRITER_INSTANCES.get(),
-                    "A permanently failed job must not deploy another attempt");
-            Assertions.assertEquals(
-                    JobStatus.FAILED.name(),
-                    engineClient.getJobStatus(jobId),
-                    "The terminal FAILED state must still be queryable after the coordinator released the job");
+            // FAILED must be terminal: observe the whole window continuously instead of sampling it
+            // once at the end, so a restart in the middle of the window cannot fall between two
+            // checks. The window is much longer than the job's 1s retry interval.
+            Awaitility.await()
+                    .atMost(TERMINAL_STABILITY_SECONDS + 10, TimeUnit.SECONDS)
+                    .during(TERMINAL_STABILITY_SECONDS, TimeUnit.SECONDS)
+                    .pollInterval(500, TimeUnit.MILLISECONDS)
+                    .untilAsserted(
+                            () -> {
+                                Assertions.assertEquals(
+                                        JobStatus.FAILED,
+                                        job.getJobStatus(),
+                                        "A permanently failed job must stay FAILED instead of restarting");
+                                Assertions.assertEquals(
+                                        EXPECTED_DEPLOYMENTS,
+                                        ArmableFailingSinkWriter.WRITER_INSTANCES.get(),
+                                        "A permanently failed job must not deploy another attempt");
+                                Assertions.assertEquals(
+                                        JobStatus.FAILED.name(),
+                                        statusClient.getJobStatus(jobId),
+                                        "The terminal FAILED state must still be queryable after the coordinator released the job");
+                            });
 
             // The whole fixed pool must be allocatable again, not merely reported as free by the
             // slot service: no slice may stay assigned and no ownership record may survive.
@@ -230,11 +249,21 @@ public class PermanentFailureCapacityReleaseIT {
             // The replacement job's cancellation must hand the pool back as well.
             awaitPoolRestored(seaTunnelServer, baseline);
         } finally {
-            if (engineClient != null) {
-                engineClient.close();
-            }
-            if (node != null) {
-                node.shutdown();
+            // Teardown is unconditional: a failed client close must still stop the member.
+            // Static controls are reset only after every job that reads them has stopped, so a
+            // failing assertion cannot leak ARMED=true into a later run.
+            try {
+                if (engineClient != null) {
+                    engineClient.close();
+                }
+            } finally {
+                try {
+                    if (node != null) {
+                        node.shutdown();
+                    }
+                } finally {
+                    ArmableFailingSinkWriter.reset();
+                }
             }
         }
     }
