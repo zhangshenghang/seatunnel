@@ -34,6 +34,7 @@ import org.apache.seatunnel.engine.e2e.TestUtils;
 import org.apache.seatunnel.engine.server.CoordinatorService;
 import org.apache.seatunnel.engine.server.SeaTunnelServer;
 import org.apache.seatunnel.engine.server.SeaTunnelServerStarter;
+import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
 
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Assertions;
@@ -44,7 +45,10 @@ import com.hazelcast.instance.impl.HazelcastInstanceImpl;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.File;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -71,15 +75,24 @@ import java.util.stream.Collectors;
  *   <li>The accepted cancel moves the job to CANCELING while the checkpoint is still held and the
  *       abort reaches the checkpoint state machine instead of serializing behind an acknowledgement
  *       that may never come.
- *   <li>The aborted checkpoint is never persisted, even after the held writer acknowledges: the
- *       storage still contains only the last completed checkpoint. Persisting it would turn rows
- *       that the cancelled run never committed into a restore point, i.e. duplicate data after a
- *       later restore.
+ *   <li>The named held checkpoint never becomes restorable, even after the held writer
+ *       acknowledges: while the writer is parked no other checkpoint can complete, so the last
+ *       checkpoint that completed before the hold stays the newest restorable candidate for the
+ *       pipeline and the checkpoint directory of this job holds no file for the held id. Persisting
+ *       it would turn rows that the cancelled run never committed into a restore point, i.e.
+ *       duplicate data after a later restore.
  *   <li>The job reaches CANCELED once the held task returns and stays CANCELED (a late
  *       acknowledgement must not revive it or its checkpoint).
- *   <li>The cancelled job's capacity is usable again: a replacement job with the same footprint
- *       reaches RUNNING, checkpoints and cancels cleanly.
+ *   <li>The cancelled job's capacity is usable again: the node runs a fixed slot pool ({@code
+ *       dynamic-slot=false}) sized to exactly one job footprint, so a replacement job with the same
+ *       footprint can only reach RUNNING after the cancelled job returned every slot it owned, and
+ *       it releases the same bounded capacity when it is cancelled.
  * </ol>
+ *
+ * <p>The job's checkpoint storage is read through two different oracles on purpose: {@code
+ * JobClient#getCheckpointData} reports the client's newest selectable checkpoint per pipeline (it
+ * is not a storage inventory), while the checkpoint directory of this job is the actual ledger of
+ * every stored checkpoint file.
  *
  * <p>Existing coverage does not reach this window. {@code CancelDuringMasterFailoverIT} crashes the
  * master during an accepted cancel but no checkpoint is in flight; {@code
@@ -95,6 +108,21 @@ public class CancelWhileCheckpointInFlightIT {
     private static final String JOB_TEMPLATE_FILE =
             "cancel-checkpoint-in-flight/stream_fake_to_checkpoint_hold_sink.conf";
     private static final String DYNAMIC_HOLD_KEY = "dynamic_hold_key";
+
+    /** Local file checkpoint storage option that names the storage root directory. */
+    private static final String CHECKPOINT_NAMESPACE_KEY = "namespace";
+
+    /** Suffix of a checkpoint file written by the local file checkpoint storage. */
+    private static final String CHECKPOINT_FILE_SUFFIX = ".ser";
+
+    /**
+     * Slots one instance of the fixture job needs, derived from {@code PhysicalPlanGenerator}: one
+     * source split enumerator coordinator plus one task group holding the fused source and sink
+     * tasks of the single-parallelism pipeline. The test sink has no aggregated committer, so no
+     * committer coordinator is created. The node runs a fixed pool of exactly this size, which is
+     * what turns the replacement job into a capacity oracle.
+     */
+    private static final int JOB_SLOT_COUNT = 2;
 
     private static final long CLUSTER_FORMATION_TIMEOUT_SECONDS = 30;
     private static final long JOB_STATE_TIMEOUT_SECONDS = 180;
@@ -137,13 +165,15 @@ public class CancelWhileCheckpointInFlightIT {
             long jobId = jobProxy.getJobId();
 
             awaitJobStatus(coordinatorService, jobId, JobStatus.RUNNING);
+            assertSlotOwnership(node, jobId, JOB_SLOT_COUNT);
             JobClient jobClient = engineClient.createJobClient();
-            long completedBeforeCancel =
-                    awaitCheckpoint(jobClient, jobId, RestoreMode.CHECKPOINT, 0L, "before cancel");
+            long completedBeforeHold =
+                    awaitCheckpoint(
+                            jobClient, jobId, RestoreMode.CHECKPOINT, 0L, "before the hold");
             log.info(
-                    "Job {} completed checkpoint {} before the held checkpoint",
+                    "Job {} completed checkpoint {} before the hold was armed",
                     jobId,
-                    completedBeforeCancel);
+                    completedBeforeHold);
 
             // Freeze the next checkpoint in the sink, after the barrier reached every task.
             CheckpointInFlightHoldGate.arm(holdKey);
@@ -156,12 +186,24 @@ public class CancelWhileCheckpointInFlightIT {
                                             CheckpointInFlightHoldGate.holdingWriters(holdKey) > 0,
                                             "a checkpoint must reach the sink and be held"));
             long heldCheckpointId = CheckpointInFlightHoldGate.heldCheckpointId(holdKey);
+            // The hold is what makes the baseline stable: the sink writer cannot acknowledge the
+            // only in-flight checkpoint, so the pipeline cannot complete another one. Reading the
+            // last completed checkpoint here - not before arming - fences out a checkpoint that
+            // completes in the window between the first observation and the arm; taken before the
+            // hold, such a checkpoint would be a correct last restore point that the oracle would
+            // reject.
+            long lastCompletedBeforeHold =
+                    latestCheckpointId(
+                            jobClient, jobId, RestoreMode.CHECKPOINT, "last completed before hold");
             Assertions.assertTrue(
-                    heldCheckpointId > completedBeforeCancel,
-                    "The held checkpoint must be a new checkpoint above "
-                            + completedBeforeCancel
-                            + ", but was "
-                            + heldCheckpointId);
+                    heldCheckpointId > lastCompletedBeforeHold,
+                    "The held checkpoint "
+                            + heldCheckpointId
+                            + " must be newer than the last checkpoint completed before the hold ("
+                            + lastCompletedBeforeHold
+                            + ", first observed before arming: "
+                            + completedBeforeHold
+                            + ")");
 
             // Cancel while the checkpoint is unacknowledged. The cancel future is bounded so a
             // cancel that serializes behind the checkpoint surfaces as a test failure instead of
@@ -204,11 +246,50 @@ public class CancelWhileCheckpointInFlightIT {
                                     Assertions.assertEquals(
                                             JobStatus.CANCELED,
                                             coordinatorService.getJobStatus(jobId)));
+            // Oracle 1: the client's newest selectable checkpoint per pipeline. The held checkpoint
+            // must never become a restore candidate, and the last checkpoint completed before the
+            // hold must stay the newest one.
+            Set<Long> restorableCheckpoints =
+                    latestCheckpointIds(jobClient, jobId, RestoreMode.CHECKPOINT);
             Assertions.assertEquals(
-                    Set.of(completedBeforeCancel),
-                    storedCheckpointIds(jobClient, jobId, RestoreMode.CHECKPOINT),
-                    "The aborted checkpoint must never be persisted, and the last completed "
-                            + "checkpoint must stay the only stored one");
+                    Set.of(lastCompletedBeforeHold),
+                    restorableCheckpoints,
+                    "The aborted checkpoint must never become restorable; the newest candidate for "
+                            + "job "
+                            + jobId
+                            + " must stay the last checkpoint completed before the hold ("
+                            + lastCompletedBeforeHold
+                            + ") instead of "
+                            + restorableCheckpoints);
+            Assertions.assertFalse(
+                    restorableCheckpoints.contains(heldCheckpointId),
+                    "The aborted in-flight checkpoint "
+                            + heldCheckpointId
+                            + " became a restore candidate of job "
+                            + jobId);
+            // Oracle 2: the actual storage ledger of this job. The client API above only reports
+            // the
+            // newest candidate per pipeline, so it cannot prove that no file was written for the
+            // aborted checkpoint; the checkpoint directory can.
+            Set<Long> storedCheckpointFiles = storedCheckpointFileIds(seaTunnelConfig, jobId);
+            Assertions.assertTrue(
+                    storedCheckpointFiles.contains(lastCompletedBeforeHold),
+                    "The checkpoint directory of job "
+                            + jobId
+                            + " must hold the checkpoint completed before the hold ("
+                            + lastCompletedBeforeHold
+                            + "), otherwise this storage oracle is not looking at the job's files: "
+                            + storedCheckpointFiles);
+            Assertions.assertFalse(
+                    storedCheckpointFiles.contains(heldCheckpointId),
+                    "The aborted in-flight checkpoint "
+                            + heldCheckpointId
+                            + " was persisted for job "
+                            + jobId
+                            + " even though its job was cancelled: "
+                            + storedCheckpointFiles);
+            // Every slot of the fixed pool must be back before the replacement is admitted.
+            awaitSlotOwnership(node, jobId, 0);
 
             // The cancelled job's capacity must be usable again.
             String replacementHoldKey = testCaseName + "_replacement_" + System.nanoTime();
@@ -224,10 +305,14 @@ public class CancelWhileCheckpointInFlightIT {
                                 .execute();
                 long replacementId = replacement.getJobId();
                 awaitJobStatus(coordinatorService, replacementId, JobStatus.RUNNING);
+                // The pool is exactly one footprint wide, so the replacement can only reach
+                // RUNNING after the cancelled job returned every slot it owned.
+                assertSlotOwnership(node, replacementId, JOB_SLOT_COUNT);
                 awaitCheckpoint(
                         jobClient, replacementId, RestoreMode.CHECKPOINT, 0L, "replacement job");
                 replacement.cancelJob();
                 awaitJobStatus(coordinatorService, replacementId, JobStatus.CANCELED);
+                awaitSlotOwnership(node, replacementId, 0);
             } finally {
                 FileUtils.deleteFile(replacementConfigFile);
             }
@@ -262,13 +347,131 @@ public class CancelWhileCheckpointInFlightIT {
         }
     }
 
-    private static Set<Long> storedCheckpointIds(
+    /**
+     * Returns the newest selectable checkpoint id per pipeline, as reported by the client. With a
+     * single pipeline this is a singleton, and it is a restore-candidate selection rather than an
+     * inventory of the stored checkpoint files.
+     */
+    private static Set<Long> latestCheckpointIds(
             JobClient jobClient, long jobId, RestoreMode restoreMode) {
         List<JobPipelineCheckpointData> checkpoints =
                 jobClient.getCheckpointData(jobId, restoreMode);
         return checkpoints.stream()
                 .map(JobPipelineCheckpointData::getCheckpointId)
                 .collect(Collectors.toSet());
+    }
+
+    /**
+     * Reads the id of the newest {@code restoreMode} checkpoint the client selects for the job.
+     *
+     * @throws AssertionError when the job has no such checkpoint
+     */
+    private static long latestCheckpointId(
+            JobClient jobClient, long jobId, RestoreMode restoreMode, String description) {
+        List<JobPipelineCheckpointData> checkpoints =
+                jobClient.getCheckpointData(jobId, restoreMode);
+        return checkpoints.stream()
+                .max(Comparator.comparingLong(JobPipelineCheckpointData::getCheckpointId))
+                .map(JobPipelineCheckpointData::getCheckpointId)
+                .orElseThrow(
+                        () ->
+                                new AssertionError(
+                                        "No "
+                                                + restoreMode
+                                                + " checkpoint for "
+                                                + description
+                                                + " of job "
+                                                + jobId
+                                                + ": "
+                                                + checkpoints));
+    }
+
+    /**
+     * Reads the checkpoint ids the local file checkpoint storage actually holds for the job, i.e.
+     * every stored checkpoint file rather than the newest one the client selects.
+     */
+    private static Set<Long> storedCheckpointFileIds(SeaTunnelConfig seaTunnelConfig, long jobId) {
+        String namespace =
+                seaTunnelConfig
+                        .getEngineConfig()
+                        .getCheckpointConfig()
+                        .getStorage()
+                        .getStoragePluginConfig()
+                        .get(CHECKPOINT_NAMESPACE_KEY);
+        Assertions.assertNotNull(
+                namespace,
+                "The engine config must configure the local file checkpoint storage namespace, "
+                        + "otherwise the stored-checkpoint oracle cannot find the job's files");
+        File[] files = new File(namespace, Long.toString(jobId)).listFiles();
+        Set<Long> checkpointIds = new HashSet<>();
+        if (files == null) {
+            return checkpointIds;
+        }
+        for (File file : files) {
+            String name = file.getName();
+            if (!name.endsWith(CHECKPOINT_FILE_SUFFIX)) {
+                continue;
+            }
+            String[] segments =
+                    name.substring(0, name.length() - CHECKPOINT_FILE_SUFFIX.length()).split("-");
+            // Stored files are named <writeMillis>-<random>-<pipelineId>-<checkpointId>.ser
+            Assertions.assertEquals(
+                    4, segments.length, "Unexpected checkpoint file name layout: " + name);
+            checkpointIds.add(Long.parseLong(segments[3]));
+        }
+        return checkpointIds;
+    }
+
+    /**
+     * Asserts slot ownership on the node's own slot pool, not on the master's heartbeated registry:
+     * with a fixed pool this is the authoritative view of which job owns which slot.
+     *
+     * @param node the cluster member that also owns the worker slot pool
+     * @param jobId the only job allowed to hold slots
+     * @param expectedSlotCount {@link #JOB_SLOT_COUNT} while the job runs, zero once it released
+     *     every slot
+     */
+    private static void assertSlotOwnership(
+            HazelcastInstanceImpl node, long jobId, int expectedSlotCount) {
+        SeaTunnelServer server = node.node.getNodeEngine().getService(SeaTunnelServer.SERVICE_NAME);
+        SlotProfile[] assignedSlots = server.getSlotService().getWorkerProfile().getAssignedSlots();
+        if (expectedSlotCount == 0) {
+            Assertions.assertEquals(
+                    0,
+                    assignedSlots.length,
+                    "The fixed "
+                            + JOB_SLOT_COUNT
+                            + "-slot pool must be fully free after job "
+                            + jobId
+                            + " terminated, but slots are still assigned: "
+                            + Arrays.toString(assignedSlots));
+            return;
+        }
+        Assertions.assertEquals(
+                expectedSlotCount,
+                assignedSlots.length,
+                "Job "
+                        + jobId
+                        + " must own all "
+                        + expectedSlotCount
+                        + " slots of the fixed pool: "
+                        + Arrays.toString(assignedSlots));
+        Set<Long> owners =
+                Arrays.stream(assignedSlots)
+                        .map(SlotProfile::getOwnerJobID)
+                        .collect(Collectors.toSet());
+        Assertions.assertEquals(
+                Set.of(jobId),
+                owners,
+                "Every assigned slot must belong to job " + jobId + ": " + owners);
+    }
+
+    private static void awaitSlotOwnership(
+            HazelcastInstanceImpl node, long jobId, int expectedSlotCount) {
+        Awaitility.await()
+                .atMost(JOB_STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .pollInterval(200, TimeUnit.MILLISECONDS)
+                .untilAsserted(() -> assertSlotOwnership(node, jobId, expectedSlotCount));
     }
 
     private static void awaitJobStatus(
@@ -299,38 +502,18 @@ public class CancelWhileCheckpointInFlightIT {
                 .pollInterval(1, TimeUnit.SECONDS)
                 .untilAsserted(
                         () -> {
-                            List<JobPipelineCheckpointData> checkpoints =
-                                    jobClient.getCheckpointData(jobId, restoreMode);
-                            JobPipelineCheckpointData newest =
-                                    checkpoints.stream()
-                                            .max(
-                                                    java.util.Comparator.comparingLong(
-                                                            JobPipelineCheckpointData
-                                                                    ::getCheckpointId))
-                                            .orElse(null);
-                            Assertions.assertNotNull(
-                                    newest,
-                                    "No "
-                                            + restoreMode
-                                            + " checkpoint for "
-                                            + description
-                                            + " of job "
-                                            + jobId
-                                            + ": "
-                                            + checkpoints);
+                            long newest =
+                                    latestCheckpointId(jobClient, jobId, restoreMode, description);
                             Assertions.assertTrue(
-                                    newest.getCheckpointId() > minExclusiveCheckpointId,
+                                    newest > minExclusiveCheckpointId,
                                     "Waiting for a "
                                             + description
                                             + " checkpoint above id "
                                             + minExclusiveCheckpointId
                                             + " but the latest is "
-                                            + newest.getCheckpointId());
+                                            + newest);
                         });
-        return jobClient.getCheckpointData(jobId, restoreMode).stream()
-                .max(java.util.Comparator.comparingLong(JobPipelineCheckpointData::getCheckpointId))
-                .map(JobPipelineCheckpointData::getCheckpointId)
-                .orElseThrow(() -> new AssertionError("checkpoint disappeared: " + description));
+        return latestCheckpointId(jobClient, jobId, restoreMode, description);
     }
 
     private static String createJobConfigFile(String testCaseName, String holdKey)
@@ -355,6 +538,11 @@ public class CancelWhileCheckpointInFlightIT {
                 .getHazelcastConfig()
                 .setClusterName(TestUtils.getClusterName(testClusterName));
         seaTunnelConfig.getEngineConfig().getHttpConfig().setEnabled(false);
+        // A fixed pool of exactly one job footprint. The engine fixture's dynamic-slot:true would
+        // hand the replacement job freshly allocated slots even when the cancelled job leaked its
+        // ownership, so it could not prove that the capacity came back.
+        seaTunnelConfig.getEngineConfig().getSlotServiceConfig().setDynamicSlot(false);
+        seaTunnelConfig.getEngineConfig().getSlotServiceConfig().setSlotNum(JOB_SLOT_COUNT);
         return seaTunnelConfig;
     }
 
