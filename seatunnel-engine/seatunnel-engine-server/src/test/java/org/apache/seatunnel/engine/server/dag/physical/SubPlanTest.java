@@ -19,11 +19,14 @@ package org.apache.seatunnel.engine.server.dag.physical;
 
 import org.apache.seatunnel.api.options.EnvCommonOptions;
 import org.apache.seatunnel.engine.common.config.JobConfig;
+import org.apache.seatunnel.engine.common.job.JobResult;
+import org.apache.seatunnel.engine.common.job.JobStatus;
 import org.apache.seatunnel.engine.common.utils.PassiveCompletableFuture;
 import org.apache.seatunnel.engine.common.utils.concurrent.CompletableFuture;
 import org.apache.seatunnel.engine.core.job.JobImmutableInformation;
 import org.apache.seatunnel.engine.core.job.PipelineStatus;
 import org.apache.seatunnel.engine.server.AbstractSeaTunnelServerTest;
+import org.apache.seatunnel.engine.server.checkpoint.CheckpointCoordinatorState;
 import org.apache.seatunnel.engine.server.checkpoint.CheckpointManager;
 import org.apache.seatunnel.engine.server.execution.ExecutionState;
 import org.apache.seatunnel.engine.server.master.JobMaster;
@@ -41,9 +44,11 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -52,7 +57,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * Covers checkpoint coordinator restore decisions for running pipelines with an intentionally
- * closed idle source reader.
+ * closed idle source reader, the restore-cause retention and the terminal state a rejected
+ * replacement admission must publish.
  */
 class SubPlanTest extends AbstractSeaTunnelServerTest<SubPlanTest> {
 
@@ -392,21 +398,187 @@ class SubPlanTest extends AbstractSeaTunnelServerTest<SubPlanTest> {
         return (Boolean) method.invoke(subPlan);
     }
 
-    private SubPlan newSubPlan(
-            ExecutorService executorService,
-            List<PhysicalVertex> physicalVertexList,
-            List<PhysicalVertex> coordinatorVertexList) {
+    /**
+     * A rejected replacement admission must end the run in a terminal state, so the plan reports a
+     * failed job instead of a finished one.
+     *
+     * <p>This is the reported defect: {@link SubPlan#prepareRestorePipeline()} resets the run to
+     * {@code CREATED} and installs a new completion future, so completing that future with the
+     * reset state made {@link PhysicalPlan} count the pipeline as finished and a single-pipeline
+     * job report {@code FINISHED} even though its replacement slots were never admitted. The test
+     * drives the real {@link SubPlan}, {@link PhysicalPlan} and job state transitions; only the
+     * slot allocation is mocked, because making a real fixed-capacity cluster fail its ownership
+     * write is a different test.
+     */
+    @Test
+    void shouldEndJobAsFailedWhenRestoreAdmissionIsRejected() throws Exception {
+        assertJobWithRejectedRestoreAdmission(false, JobStatus.FAILED);
+    }
+
+    /**
+     * A cancellation that arrives while the replacement admission is pending must win over the
+     * failure, exactly as it does for a worker failure: the job was asked to stop, so the rejected
+     * run ends {@code CANCELED} instead of {@code FAILED}.
+     */
+    @Test
+    void shouldEndJobAsCanceledWhenRestoreAdmissionIsRejectedAfterCancelRequest() throws Exception {
+        assertJobWithRejectedRestoreAdmission(true, JobStatus.CANCELED);
+    }
+
+    /**
+     * An engine-driven stop cancels a run too, even when no cancellation reached the pipeline yet.
+     */
+    @Test
+    void shouldTreatTheJobStateAsACancelOrStopRequest() {
+        PhysicalPlan physicalPlan = mock(PhysicalPlan.class);
+        JobMaster jobMaster = mock(JobMaster.class);
+        when(jobMaster.getPhysicalPlan()).thenReturn(physicalPlan);
+
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        try {
+            SubPlan subPlan =
+                    newSubPlan(
+                            executorService,
+                            Collections.singletonList(mockPhysicalVertex(ExecutionState.FAILED)),
+                            Collections.emptyList());
+            subPlan.setJobMaster(jobMaster);
+
+            when(physicalPlan.getJobStatus()).thenReturn(JobStatus.RUNNING);
+            Assertions.assertFalse(subPlan.isCancelOrStopRequested());
+            when(physicalPlan.getJobStatus()).thenReturn(JobStatus.FAILING);
+            Assertions.assertFalse(subPlan.isCancelOrStopRequested());
+            when(physicalPlan.getJobStatus()).thenReturn(JobStatus.CANCELING);
+            Assertions.assertTrue(subPlan.isCancelOrStopRequested());
+            when(physicalPlan.getJobStatus()).thenReturn(JobStatus.CANCELED);
+            Assertions.assertTrue(subPlan.isCancelOrStopRequested());
+
+            // The request can reach the pipeline before the job state does; it must count as well.
+            when(physicalPlan.getJobStatus()).thenReturn(JobStatus.RUNNING);
+            subPlan.markCancelRequested();
+            Assertions.assertTrue(subPlan.isCancelOrStopRequested());
+        } finally {
+            executorService.shutdownNow();
+        }
+    }
+
+    /**
+     * Runs a one-pipeline job whose failed pipeline prepares a restore and is then rejected by the
+     * replacement admission, and checks the job and pipeline status the plan publishes.
+     */
+    private void assertJobWithRejectedRestoreAdmission(
+            boolean cancelDuringAdmission, JobStatus expectedJobStatus) throws Exception {
+        CheckpointManager checkpointManager = mock(CheckpointManager.class);
+        CompletableFuture<Void> pipelineEndListen = new CompletableFuture<>();
+        pipelineEndListen.complete(null);
+        when(checkpointManager.listenPipeline(anyInt(), any())).thenReturn(pipelineEndListen);
+        PassiveCompletableFuture<CheckpointCoordinatorState> canceledCheckpoint =
+                new PassiveCompletableFuture<>(
+                        CompletableFuture.<CheckpointCoordinatorState>completedFuture(null));
+        when(checkpointManager.cancelCheckpoint(anyInt())).thenReturn(canceledCheckpoint);
+
+        JobMaster jobMaster = mock(JobMaster.class);
+        when(jobMaster.getCheckpointManager()).thenReturn(checkpointManager);
+        // A restore only happens while the job still wants to restore.
+        when(jobMaster.isNeedRestore()).thenReturn(true);
+        when(jobMaster.preApplyResources(any(SubPlan.class)))
+                .thenAnswer(
+                        invocation -> {
+                            if (cancelDuringAdmission) {
+                                // PhysicalPlan marks every pipeline cancel-requested before it
+                                // starts the cancel, which can happen while this admission runs.
+                                ((SubPlan) invocation.getArgument(0)).markCancelRequested();
+                            }
+                            return false;
+                        });
+
+        ExecutorService subPlanExecutor = Executors.newSingleThreadExecutor();
+        ExecutorService planExecutor = Executors.newSingleThreadExecutor();
+        try {
+            when(jobMaster.getExecutorService()).thenReturn(planExecutor);
+
+            JobImmutableInformation jobImmutableInformation = newJobImmutableInformation();
+            PhysicalVertex vertex = mockPhysicalVertex(ExecutionState.FAILED);
+            when(vertex.initStateFuture())
+                    .thenReturn(new PassiveCompletableFuture<>(new CompletableFuture<>()));
+            SubPlan subPlan =
+                    newSubPlan(
+                            subPlanExecutor,
+                            Collections.singletonList(vertex),
+                            Collections.emptyList(),
+                            jobImmutableInformation);
+
+            PhysicalPlan physicalPlan =
+                    new PhysicalPlan(
+                            Collections.singletonList(subPlan),
+                            planExecutor,
+                            jobImmutableInformation,
+                            System.currentTimeMillis(),
+                            nodeEngine
+                                    .getHazelcastInstance()
+                                    .getMap("sub-plan-test-job-state-" + UUID.randomUUID()),
+                            nodeEngine
+                                    .getHazelcastInstance()
+                                    .getMap("sub-plan-test-job-timestamps-" + UUID.randomUUID()));
+            physicalPlan.setJobMaster(jobMaster);
+            when(jobMaster.getPhysicalPlan()).thenReturn(physicalPlan);
+            // The run starts failed, which is the state the restore path under test is entered
+            // from; a CREATED pipeline would be started as a fresh deployment instead.
+            subPlan.setCurrPipelineStatus(PipelineStatus.FAILED);
+
+            PassiveCompletableFuture<JobResult> jobFuture = physicalPlan.initStateFuture();
+            physicalPlan.startJob();
+            subPlan.startSubPlanStateProcess();
+
+            JobResult result = jobFuture.get(60, TimeUnit.SECONDS);
+            Assertions.assertEquals(
+                    expectedJobStatus,
+                    result.getStatus(),
+                    "a rejected replacement admission must not be reported as a finished job");
+            Assertions.assertEquals(physicalPlan.getJobStatus(), result.getStatus());
+            Assertions.assertTrue(
+                    subPlan.getPipelineState().isEndState(),
+                    "the pipeline must publish a terminal state, was "
+                            + subPlan.getPipelineState());
+            Assertions.assertTrue(
+                    subPlan.getErrorByPhysicalVertex().get().contains("not restored"),
+                    "the rejected admission must retain its error: "
+                            + subPlan.getErrorByPhysicalVertex().get());
+        } finally {
+            subPlanExecutor.shutdownNow();
+            planExecutor.shutdownNow();
+        }
+    }
+
+    private JobImmutableInformation newJobImmutableInformation() {
         JobConfig jobConfig = new JobConfig();
         jobConfig.setName("test");
-        // prepareRestorePipeline really sleeps for job.retry.interval.seconds, which defaults to
-        // 3. Only the restore test reaches that sleep, but the whole class shares this factory and
-        // no unit test should spend seconds waiting.
         jobConfig.getEnvOptions().put(EnvCommonOptions.JOB_RETRY_INTERVAL_SECONDS.key(), 0);
 
         JobImmutableInformation jobImmutableInformation = mock(JobImmutableInformation.class);
         when(jobImmutableInformation.getJobId()).thenReturn(1L);
         when(jobImmutableInformation.getJobConfig()).thenReturn(jobConfig);
+        return jobImmutableInformation;
+    }
 
+    private SubPlan newSubPlan(
+            ExecutorService executorService,
+            List<PhysicalVertex> physicalVertexList,
+            List<PhysicalVertex> coordinatorVertexList) {
+        return newSubPlan(
+                executorService,
+                physicalVertexList,
+                coordinatorVertexList,
+                newJobImmutableInformation());
+    }
+
+    private SubPlan newSubPlan(
+            ExecutorService executorService,
+            List<PhysicalVertex> physicalVertexList,
+            List<PhysicalVertex> coordinatorVertexList,
+            JobImmutableInformation jobImmutableInformation) {
+        // prepareRestorePipeline really sleeps for job.retry.interval.seconds, which defaults to
+        // 3. Only the restore test reaches that sleep, but the whole class shares this factory and
+        // no unit test should spend seconds waiting.
         IMap<Object, Object> runningJobStateIMap =
                 nodeEngine
                         .getHazelcastInstance()

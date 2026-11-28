@@ -160,6 +160,7 @@ public class JobMasterMasterFailoverResourceTest
                         invocation ->
                                 realOwnershipMap.remove(
                                         (PipelineLocation) invocation.getArgument(0)));
+        delegateConditionalOwnershipUpdates(lostAckOwnershipMap, realOwnershipMap);
 
         JobMaster jobMaster = newJobMaster(jobId, jobImmutableInformationData, lostAckOwnershipMap);
         jobMaster.init(System.currentTimeMillis(), false);
@@ -241,6 +242,7 @@ public class JobMasterMasterFailoverResourceTest
         Mockito.doThrow(new HazelcastException("owned slot profiles IMap is unavailable"))
                 .when(rejectingOwnershipMap)
                 .put(Mockito.any(), Mockito.any());
+        delegateConditionalOwnershipUpdates(rejectingOwnershipMap, realOwnershipMap);
 
         JobMaster restored =
                 newJobMaster(jobId, jobImmutableInformationData, rejectingOwnershipMap);
@@ -342,6 +344,7 @@ public class JobMasterMasterFailoverResourceTest
                         })
                 .when(partiallyAvailableOwnershipMap)
                 .put(Mockito.any(), Mockito.any());
+        delegateConditionalOwnershipUpdates(partiallyAvailableOwnershipMap, realOwnershipMap);
 
         JobMaster jobMaster =
                 newJobMaster(jobId, jobImmutableInformationData, partiallyAvailableOwnershipMap);
@@ -430,6 +433,7 @@ public class JobMasterMasterFailoverResourceTest
                             return realOwnershipMap.put(
                                     invocation.getArgument(0), invocation.getArgument(1));
                         });
+        delegateConditionalOwnershipUpdates(transientlyFailingMap, realOwnershipMap);
 
         JobMaster jobMaster =
                 newJobMaster(jobId, jobImmutableInformationData, transientlyFailingMap);
@@ -569,6 +573,76 @@ public class JobMasterMasterFailoverResourceTest
     }
 
     /**
+     * A delayed cleanup of an old execution must not delete the ownership record of a newer
+     * execution that re-uses the same job ID.
+     *
+     * <p>The supported SAVEPOINT re-submission re-uses the source job ID ({@code
+     * ClientJobExecutionEnvironment}), so the replacement execution records its own allocation
+     * under the same pipeline and task-group keys. A release of the old allocation is fenced by the
+     * worker's allocation sequence, but the metadata update used to remove whatever the keys
+     * pointed to at that moment: the newer execution then kept running while its only recovery
+     * handle was gone. The terminal drain and the background retry that re-runs it share the
+     * record-removal path, so the replacement mapping is installed before the drain of the old
+     * execution and must survive it.
+     */
+    @Test
+    void testDelayedCleanupKeepsNewerExecutionOwnershipRecord() throws Exception {
+        long jobId = instance.getFlakeIdGenerator("master-failover-delayed-cleanup").newId();
+        ResourceManager resourceManager = server.getCoordinatorService().getResourceManager();
+        JobMaster oldExecution = preparePendingJobWithRetainedAdmissionSlots(jobId);
+        IMap<PipelineLocation, Map<TaskGroupLocation, SlotProfile>> realOwnershipMap =
+                nodeEngine.getHazelcastInstance().getMap("ownedSlotProfilesIMap");
+        SubPlan firstPipeline = oldExecution.getPhysicalPlan().getPipelineList().get(0);
+        PipelineLocation pipelineLocation = firstPipeline.getPipelineLocation();
+        TaskGroupLocation taskGroupLocation =
+                firstPipeline.getCoordinatorVertexList().isEmpty()
+                        ? firstPipeline.getPhysicalVertexList().get(0).getTaskGroupLocation()
+                        : firstPipeline.getCoordinatorVertexList().get(0).getTaskGroupLocation();
+        // The replacement execution persisted a new allocation for the same keys. Its worker,
+        // slot and allocation sequence are what fences this release from a newer one; the address
+        // and slot number are that of the single-node test cluster, which is where a fresh
+        // allocation of this job would land again.
+        String newerSequence = "newer-execution-allocation";
+        SlotProfile newerAllocation =
+                new SlotProfile(
+                        instance.getCluster().getLocalMember().getAddress(),
+                        0,
+                        new ResourceProfile(),
+                        newerSequence);
+        newerAllocation.assign(jobId, newerSequence);
+        Map<TaskGroupLocation, SlotProfile> newerRecord = new HashMap<>();
+        newerRecord.put(taskGroupLocation, newerAllocation);
+        realOwnershipMap.put(pipelineLocation, newerRecord);
+        try {
+            oldExecution.cancelJob();
+
+            Assertions.assertEquals(
+                    JobStatus.CANCELED, oldExecution.getPhysicalPlan().getJobStatus());
+            Assertions.assertEquals(
+                    newerRecord,
+                    realOwnershipMap.get(pipelineLocation),
+                    "the delayed cleanup removed the ownership record of a newer execution");
+        } finally {
+            realOwnershipMap.remove(pipelineLocation);
+            releasePersistedSlots(resourceManager, oldExecution, jobId);
+        }
+    }
+
+    /**
+     * Makes a mocked ownership map keep the real map's atomic conditional update semantics, so a
+     * test can reject a specific write without turning the record cleanup into a no-op.
+     */
+    private static void delegateConditionalOwnershipUpdates(
+            IMap<PipelineLocation, Map<TaskGroupLocation, SlotProfile>> mockedOwnershipMap,
+            IMap<PipelineLocation, Map<TaskGroupLocation, SlotProfile>> realOwnershipMap) {
+        Mockito.when(mockedOwnershipMap.compute(Mockito.any(), Mockito.any()))
+                .thenAnswer(
+                        invocation ->
+                                realOwnershipMap.compute(
+                                        invocation.getArgument(0), invocation.getArgument(1)));
+    }
+
+    /**
      * Builds a pending job whose ownership writes all fail, so every slot it pre-applied is only
      * tracked by the attempt ledger of this master.
      */
@@ -604,6 +678,7 @@ public class JobMasterMasterFailoverResourceTest
         Mockito.doThrow(new HazelcastException("owned slot profiles IMap is unavailable"))
                 .when(unavailableOwnershipMap)
                 .put(Mockito.any(), Mockito.any());
+        delegateConditionalOwnershipUpdates(unavailableOwnershipMap, realOwnershipMap);
         JobMaster jobMaster =
                 newJobMaster(
                         jobId,

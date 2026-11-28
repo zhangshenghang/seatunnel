@@ -1115,7 +1115,7 @@ public class JobMaster {
                     continue;
                 }
                 attemptOwnedSlotProfiles.remove(profileEntry.getKey());
-                removeOwnedSlotProfileRecord(entry.getKey(), profileEntry.getKey());
+                removeOwnedSlotProfileRecord(entry.getKey(), profileEntry.getKey(), slotProfile);
             }
         }
         return allReleased;
@@ -1125,26 +1125,58 @@ public class JobMaster {
      * Drops the ownership record of one released task group, so a later restore does not adopt a
      * slot that no longer belongs to the job.
      *
+     * <p>The record is keyed by pipeline and task group, which are also the keys of a newer
+     * execution of the same job ID: the supported SAVEPOINT submission re-uses the source job ID,
+     * and the replacement execution records its own allocation under the same keys. A delayed
+     * cleanup of the old execution must therefore not remove whatever the keys point to now. The
+     * release that produced this call is fenced by the allocation it released: the caller passes
+     * the exact {@link SlotProfile} the attempt ledger retained, and the record is only dropped
+     * while it still holds that same allocation (worker, slot and allocation sequence, plus the
+     * owning job of the profile). The caller is also the execution owner: the ledger that produced
+     * the entry lives in this {@link JobMaster} instance, so a mapping of a newer execution can
+     * only be preserved, never overwritten, by this method.
+     *
+     * <p>The update is applied atomically with {@link IMap#compute}: the comparison runs against
+     * the entry the map holds at that moment, so neither a newer mapping nor a concurrent writer
+     * between a read and an unconditional write can be lost. The comparison is repeated inside the
+     * remapping function because the preliminary read only avoids rewriting a record this release
+     * does not own.
+     *
      * @param pipelineLocation pipeline owning the record
      * @param taskGroupLocation released task group to remove from the record
+     * @param releasedSlotProfile allocation the release of this task group was based on
      */
     private void removeOwnedSlotProfileRecord(
-            PipelineLocation pipelineLocation, TaskGroupLocation taskGroupLocation) {
+            PipelineLocation pipelineLocation,
+            TaskGroupLocation taskGroupLocation,
+            SlotProfile releasedSlotProfile) {
         try {
             Map<TaskGroupLocation, SlotProfile> ownedSlotProfiles =
                     ownedSlotProfilesIMap.get(pipelineLocation);
             if (ownedSlotProfiles == null) {
                 return;
             }
-            Map<TaskGroupLocation, SlotProfile> remaining = new HashMap<>(ownedSlotProfiles);
-            if (remaining.remove(taskGroupLocation) == null) {
+            if (!isSameAllocation(ownedSlotProfiles.get(taskGroupLocation), releasedSlotProfile)) {
+                logKeepingNewerAllocation(pipelineLocation, taskGroupLocation, releasedSlotProfile);
                 return;
             }
-            if (remaining.isEmpty()) {
-                ownedSlotProfilesIMap.remove(pipelineLocation);
-            } else {
-                ownedSlotProfilesIMap.put(pipelineLocation, remaining);
-            }
+            ownedSlotProfilesIMap.compute(
+                    pipelineLocation,
+                    (key, currentSlotProfiles) -> {
+                        if (currentSlotProfiles == null) {
+                            return null;
+                        }
+                        if (!isSameAllocation(
+                                currentSlotProfiles.get(taskGroupLocation), releasedSlotProfile)) {
+                            logKeepingNewerAllocation(
+                                    pipelineLocation, taskGroupLocation, releasedSlotProfile);
+                            return currentSlotProfiles;
+                        }
+                        Map<TaskGroupLocation, SlotProfile> remaining =
+                                new HashMap<>(currentSlotProfiles);
+                        remaining.remove(taskGroupLocation);
+                        return remaining.isEmpty() ? null : remaining;
+                    });
         } catch (Exception e) {
             LOGGER.warning(
                     String.format(
@@ -1153,6 +1185,35 @@ public class JobMaster {
                             jobImmutableInformation.getJobId(),
                             ExceptionUtils.getMessage(e)));
         }
+    }
+
+    /** Reports an ownership record that now belongs to an allocation this release does not own. */
+    private void logKeepingNewerAllocation(
+            PipelineLocation pipelineLocation,
+            TaskGroupLocation taskGroupLocation,
+            SlotProfile releasedSlotProfile) {
+        LOGGER.info(
+                String.format(
+                        "Keeping the ownership record of task group %s of pipeline %s for job %d: it belongs to another allocation than the released %s",
+                        taskGroupLocation,
+                        pipelineLocation,
+                        jobImmutableInformation.getJobId(),
+                        releasedSlotProfile));
+    }
+
+    /**
+     * Whether a recorded ownership entry describes exactly the allocation that was released.
+     *
+     * <p>{@link SlotProfile#equals(Object)} already compares the worker, the slot and the
+     * allocation sequence, which changes whenever a fixed slot is released and assigned again, so a
+     * newer allocation of the same physical slot is not mistaken for the released one. The owning
+     * job is compared as well because the profile carries it as part of the allocation identity.
+     */
+    private static boolean isSameAllocation(SlotProfile recorded, SlotProfile released) {
+        return recorded != null
+                && released != null
+                && recorded.equals(released)
+                && recorded.getOwnerJobID() == released.getOwnerJobID();
     }
 
     /**

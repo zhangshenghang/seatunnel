@@ -24,6 +24,7 @@ import org.apache.seatunnel.api.options.EnvCommonOptions;
 import org.apache.seatunnel.common.utils.ExceptionUtils;
 import org.apache.seatunnel.common.utils.RetryUtils;
 import org.apache.seatunnel.engine.common.Constant;
+import org.apache.seatunnel.engine.common.job.JobStatus;
 import org.apache.seatunnel.engine.common.utils.ExceptionUtil;
 import org.apache.seatunnel.engine.common.utils.PassiveCompletableFuture;
 import org.apache.seatunnel.engine.common.utils.concurrent.CompletableFuture;
@@ -681,6 +682,60 @@ public class SubPlan {
         return false;
     }
 
+    /**
+     * Ends a pipeline whose replacement admission was rejected in a terminal state.
+     *
+     * <p>{@link #prepareRestorePipeline()} reset this run to {@code CREATED} and installed a new
+     * completion future, so stopping after a rejected admission without a transition would publish
+     * {@code CREATED} as the result of the pipeline. {@link
+     * PhysicalPlan#addPipelineEndCallback(SubPlan)} counts every completed pipeline as a finished
+     * one and only {@code FAILED} and {@code CANCELED} as failures or cancellations, so a
+     * single-pipeline job would be reported {@code FINISHED} and the job-level checkpoint cleanup
+     * could delete retained recovery data. The run is therefore ended as {@code FAILED}, or as
+     * {@code CANCELED} when a cancellation or stop request arrived while the admission was pending,
+     * which is the precedence {@link #determinePipelineEndState()} already uses for worker
+     * failures.
+     *
+     * @return the terminal status the pipeline ended with
+     */
+    private PipelineStatus endRejectedRestoreAdmission() {
+        PipelineStatus endState =
+                isCancelOrStopRequested() ? PipelineStatus.CANCELED : PipelineStatus.FAILED;
+        errorByPhysicalVertex.compareAndSet(
+                null,
+                String.format(
+                        "Pipeline %s was not restored: the resources of its replacement allocation were not admitted after %d attempts",
+                        pipelineFullName, RESTORE_ADMISSION_ATTEMPT));
+        // Stop the state process first: updatePipelineState() re-enters stateProcess(), and a
+        // transition out of CREATED would otherwise start another restore round (and another
+        // admission) for a pipeline that just failed admission.
+        stopSubPlanStateProcess();
+        updatePipelineState(endState);
+        PipelineStatus publishedState = getPipelineState();
+        if (publishedState != null && publishedState.isEndState()) {
+            // A concurrent terminal transition (for example a cancellation) already published the
+            // end state of this run; never report a non-terminal result to the plan.
+            return publishedState;
+        }
+        return endState;
+    }
+
+    /**
+     * Whether this pipeline is being cancelled or stopped, in which case a failed run must end as
+     * {@code CANCELED} instead of {@code FAILED}.
+     */
+    @VisibleForTesting
+    boolean isCancelOrStopRequested() {
+        if (cancelRequested) {
+            return true;
+        }
+        JobStatus jobStatus =
+                jobMaster.getPhysicalPlan() == null
+                        ? null
+                        : jobMaster.getPhysicalPlan().getJobStatus();
+        return JobStatus.CANCELING.equals(jobStatus) || JobStatus.CANCELED.equals(jobStatus);
+    }
+
     /** restore the pipeline when pipeline failed or canceled by error. */
     public void restorePipeline() {
         try {
@@ -928,17 +983,18 @@ public class SubPlan {
                     // confirmed; deploying anyway would run the pipeline on the identities that
                     // were just released and could later overwrite the retained mapping with them.
                     if (!applyRestoreResources()) {
+                        // The run was reset to CREATED for the replacement admission, so it has no
+                        // terminal state of its own yet. Publishing CREATED here would count as a
+                        // successful completion in PhysicalPlan; end the run explicitly instead.
+                        PipelineStatus rejectedState = endRejectedRestoreAdmission();
                         log.error(
-                                "Could not apply the resources needed to restore pipeline {}, its retained slots stay owned by job {} until it retries or ends",
+                                "Could not apply the resources needed to restore pipeline {}, ending it as {}; the slots the rejected round retained are released with the pipeline",
                                 pipelineFullName,
-                                pipelineLocation.getJobId());
-                        subPlanDone(getPipelineState());
-                        stopSubPlanStateProcess();
+                                rejectedState);
+                        subPlanDone(rejectedState);
                         pipelineFuture.complete(
                                 new PipelineExecutionState(
-                                        pipelineId,
-                                        getPipelineState(),
-                                        errorByPhysicalVertex.get()));
+                                        pipelineId, rejectedState, errorByPhysicalVertex.get()));
                         return;
                     }
                     restorePipeline();
