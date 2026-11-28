@@ -28,13 +28,22 @@ import org.apache.seatunnel.engine.common.config.SeaTunnelConfig;
 import org.apache.seatunnel.engine.common.config.server.ScheduleStrategy;
 import org.apache.seatunnel.engine.common.exception.SeaTunnelEngineException;
 import org.apache.seatunnel.engine.common.job.JobStatus;
+import org.apache.seatunnel.engine.core.checkpoint.CheckpointHistoryEntry;
+import org.apache.seatunnel.engine.core.checkpoint.CheckpointInfo;
+import org.apache.seatunnel.engine.core.checkpoint.CheckpointStatus;
 import org.apache.seatunnel.engine.core.checkpoint.CheckpointType;
 import org.apache.seatunnel.engine.core.job.JobPipelineCheckpointData;
 import org.apache.seatunnel.engine.core.job.RestoreMode;
 import org.apache.seatunnel.engine.server.CoordinatorService;
 import org.apache.seatunnel.engine.server.SeaTunnelServer;
 import org.apache.seatunnel.engine.server.SeaTunnelServerStarter;
+import org.apache.seatunnel.engine.server.TaskExecutionService;
 import org.apache.seatunnel.engine.server.checkpoint.monitor.CheckpointMonitorService;
+import org.apache.seatunnel.engine.server.dag.physical.PhysicalPlan;
+import org.apache.seatunnel.engine.server.dag.physical.PhysicalVertex;
+import org.apache.seatunnel.engine.server.dag.physical.SubPlan;
+import org.apache.seatunnel.engine.server.exception.TaskGroupContextNotFoundException;
+import org.apache.seatunnel.engine.server.execution.TaskGroupLocation;
 import org.apache.seatunnel.engine.server.master.JobMaster;
 import org.apache.seatunnel.engine.server.resourcemanager.ResourceManager;
 import org.apache.seatunnel.engine.server.resourcemanager.resource.SlotProfile;
@@ -49,6 +58,7 @@ import com.hazelcast.cluster.Address;
 import com.hazelcast.instance.impl.HazelcastInstanceImpl;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -59,6 +69,7 @@ import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * End-to-end guard for a savepoint restore that is still waiting for capacity when the active
@@ -103,16 +114,22 @@ import java.util.concurrent.atomic.AtomicReference;
  *       and no checkpoint progress.
  *   <li>When the occupying job is cancelled, the pending restore is dispatched exactly once onto
  *       the freed slices, keeps the source job id and reaches {@code RUNNING}. This step also
- *       guards <a href="https://github.com/apache/seatunnel/issues/13536">#13536</a>: cancelling
- *       the restored job while it is still {@code PENDING} must stop its already-deployed worker
- *       tasks and release their slices instead of only dropping the coordinator bookkeeping, which
- *       would leave the fixed pool permanently occupied.
- *   <li>The restored run resumes the savepoint checkpoint chain (first periodic checkpoint id above
- *       the savepoint id) and leaves the savepoint selectable, so the failover did not restart the
- *       job from scratch.
+ *       guards <a href="https://github.com/apache/seatunnel/issues/13536">#13536</a>: a job that a
+ *       master switch leaves {@code PENDING} while its worker tasks are still deployed must not
+ *       only drop its coordinator bookkeeping, which would leave the fixed pool permanently
+ *       occupied.
+ *   <li>The restored run resumes the savepoint checkpoint chain: the first periodic checkpoint the
+ *       restored run actually completes is above the savepoint id, and the savepoint stays
+ *       selectable, so the failover did not restart the job from scratch with a reset counter.
  *   <li>Cancelling the restored job returns the whole fixed pool to unassigned, so neither the
  *       pending restore nor the failover leaked admission or slot state.
  * </ol>
+ *
+ * <p>The {@code PENDING}-with-deployed-tasks cancellation boundary itself cannot stay pinned in
+ * this scenario: the new master admits a job that still owns its slices as soon as the scheduler
+ * reaches it, so whether the cancel lands inside that window depends on the pending queue order.
+ * {@link #testPendingCancelAndStopOfRecoveredJobReleaseRetainedWorkerTasks()} pins that boundary
+ * deterministically with a recovery gate the test owns.
  *
  * <p>Kept as its own class rather than added to an existing IT: the scenario needs a split cluster
  * (two master candidates plus one worker) whose active master is replaced mid-test, while the other
@@ -137,6 +154,13 @@ public class PendingRestoreMasterFailoverIT {
 
     /** The fixture has exactly one source-to-sink pipeline, so its id is always 1. */
     private static final int PIPELINE_ID = 1;
+
+    /**
+     * Page size for the checkpoint-history query. The monitor retains at most {@code
+     * checkpoint.monitor.max-history-size} entries per pipeline, so a page this large returns every
+     * entry it still keeps.
+     */
+    private static final int CHECKPOINT_HISTORY_LIMIT = 1000;
 
     private static final long STATE_TIMEOUT_SECONDS = 180;
 
@@ -331,6 +355,9 @@ public class PendingRestoreMasterFailoverIT {
                             });
 
             // ---- Phase 5: free the pool; the pending restore must be dispatched onto it.
+            // Test-owned fence for the first checkpoint of the restored run: it is taken while the
+            // restore is still PENDING and therefore cannot have a checkpoint in flight.
+            final long restoreAdmissionFenceMillis = System.currentTimeMillis();
             occupierAfterFailover.cancelJob();
             awaitStatus(newCoordinatorService, occupyingJobId, JobStatus.CANCELED);
             awaitStatus(newCoordinatorService, jobId, JobStatus.RUNNING);
@@ -340,12 +367,17 @@ public class PendingRestoreMasterFailoverIT {
                     "the cancelled occupying job must own no slice");
 
             // ---- Phase 6: the restored run must resume the savepoint checkpoint chain.
-            JobPipelineCheckpointData firstPostRestore =
-                    awaitCheckpoint(
-                            reconnectedJobClient,
+            // The oracle is the first checkpoint the restored run actually completed after the
+            // fence, not the latest checkpoint id: the latest-id view keeps the highest id ever
+            // stored, so a run that reset its counter to 1 also passes an "id above the savepoint"
+            // check once enough periodic checkpoints were taken, and the savepoint file is not
+            // keyed by the checkpoint id alone (see AbstractCheckpointStorage), so the retained
+            // savepoint does not prove the ids did not restart either.
+            CheckpointInfo firstPostRestore =
+                    awaitFirstCompletedCheckpointAfter(
+                            newCheckpointMonitor,
                             jobId,
-                            RestoreMode.CHECKPOINT,
-                            savepointId,
+                            restoreAdmissionFenceMillis,
                             "periodic checkpoint after the restored pending job was dispatched");
             Assertions.assertTrue(
                     firstPostRestore.getCheckpointId() > savepointId,
@@ -358,9 +390,11 @@ public class PendingRestoreMasterFailoverIT {
                     firstPostRestore.getCheckpointType(),
                     "the first checkpoint after the restore must be a periodic checkpoint");
 
-            // The savepoint stays selectable: it is the only durable recovery point of this job. A
-            // restore that restarted from scratch would have overwritten it with a low checkpoint
-            // id.
+            // The savepoint stays selectable: it is the only durable recovery point of this job, so
+            // the restored run may not replace the record selected for a SAVEPOINT restore. This is
+            // a selectability check only: checkpoint files also carry a timestamp and a random
+            // component, so a run that reused checkpoint ids would not necessarily overwrite the
+            // savepoint and the check above is the one that observes the first post-restore id.
             List<JobPipelineCheckpointData> savepoints =
                     reconnectedJobClient.getCheckpointData(jobId, RestoreMode.SAVEPOINT);
             Assertions.assertEquals(
@@ -370,7 +404,7 @@ public class PendingRestoreMasterFailoverIT {
             Assertions.assertEquals(
                     savepointId,
                     savepoints.get(0).getCheckpointId(),
-                    "the restored run must not overwrite the savepoint id");
+                    "the restored run must not replace the savepoint record");
             Assertions.assertEquals(
                     CheckpointType.SAVEPOINT_TYPE,
                     savepoints.get(0).getCheckpointType(),
@@ -381,24 +415,7 @@ public class PendingRestoreMasterFailoverIT {
             restoredJob.cancelJob();
             restoredJob = null;
             awaitStatus(newCoordinatorService, jobId, JobStatus.CANCELED);
-
-            Awaitility.await()
-                    .atMost(60, TimeUnit.SECONDS)
-                    .pollInterval(200, TimeUnit.MILLISECONDS)
-                    .untilAsserted(
-                            () -> {
-                                WorkerProfile profile =
-                                        workerProfile(newResourceManager, workerAddress);
-                                Assertions.assertEquals(
-                                        0,
-                                        profile.getAssignedSlots().length,
-                                        "no slice may stay assigned after every job ended: "
-                                                + slicesByJob(newResourceManager, workerAddress));
-                                Assertions.assertEquals(
-                                        SLOT_NUM,
-                                        profile.getUnassignedSlots().length,
-                                        "the whole fixed pool must be unassigned again");
-                            });
+            awaitWholePoolUnassigned(newResourceManager, workerAddress);
         } finally {
             cancelQuietly(sourceJob);
             cancelQuietly(occupyingJob);
@@ -414,6 +431,93 @@ public class PendingRestoreMasterFailoverIT {
             }
             if (masterNode2 != null) {
                 masterNode2.shutdown();
+            }
+        }
+    }
+
+    /**
+     * Deterministic guard for the cancel/stop branch a master switch leaves behind.
+     *
+     * <p>{@code CoordinatorService#restoreJobFromMasterActiveSwitch} rebuilds a running job's
+     * {@code JobMaster} from distributed state and re-enters it as {@link JobStatus#PENDING} while
+     * the worker still executes the task groups the previous master deployed and still owns their
+     * fixed slices ({@code JobMaster#getReusableSlot} deliberately reuses them). Whether the
+     * pending scheduler admits such a job before a cancel arrives depends on the pending queue
+     * order, so {@link #testPendingSavepointRestoreSurvivesMasterFailoverAndRunsOnce()} cannot keep
+     * that window open. This test pins the boundary with a recovery gate the test owns: the job is
+     * forced back to {@code PENDING} and the plan, pipeline and vertex state processes are stopped,
+     * exactly as a plan rebuilt from distributed state has never started them, while its worker
+     * task groups and slices are proven still active before the request.
+     *
+     * <p>Both the normal cancel path and the force-stop path must terminate those retained worker
+     * executions and release the slices, and they must not report the slices as free while the
+     * execution holding them is still alive: a replacement job queued on the same fixed pool may
+     * only be admitted onto slices no retained task group is using any more.
+     */
+    @Test
+    public void testPendingCancelAndStopOfRecoveredJobReleaseRetainedWorkerTasks()
+            throws Exception {
+        String testCaseName = "testPendingCancelAndStopOfRecoveredJobReleaseRetainedWorkerTasks";
+        String clusterName = "PendingRestoreMasterFailoverIT_" + testCaseName;
+
+        HazelcastInstanceImpl masterNode = null;
+        HazelcastInstanceImpl workerNode = null;
+        SeaTunnelClient engineClient = null;
+
+        try {
+            SeaTunnelConfig masterNodeConfig = newSeaTunnelConfig(clusterName);
+            SeaTunnelConfig workerNodeConfig = newSeaTunnelConfig(clusterName);
+
+            masterNode = SeaTunnelServerStarter.createMasterHazelcastInstance(masterNodeConfig);
+            workerNode = SeaTunnelServerStarter.createWorkerHazelcastInstance(workerNodeConfig);
+            Address workerAddress = workerNode.node.address;
+
+            awaitClusterSize(workerNode, 2);
+            awaitCoordinatorActive(masterNode, 60);
+
+            Common.setDeployMode(DeployMode.CLIENT);
+            ClientConfig clientConfig = ConfigProvider.locateAndGetClientConfig();
+            clientConfig.setClusterName(TestUtils.getClusterName(clusterName));
+            engineClient = new SeaTunnelClient(clientConfig);
+
+            CoordinatorService coordinatorService = coordinatorOf(masterNode);
+            ResourceManager resourceManager = coordinatorService.getResourceManager();
+            TaskExecutionService workerTaskExecutionService =
+                    serverOf(workerNode).getTaskExecutionService();
+            awaitWorkerAdvertisesWholePool(resourceManager, workerAddress);
+
+            // ---- A job that a master switch left PENDING, cancelled through the normal path.
+            assertRecoveredPendingTerminationFreesRetainedExecution(
+                    engineClient,
+                    masterNodeConfig,
+                    coordinatorService,
+                    resourceManager,
+                    workerTaskExecutionService,
+                    workerAddress,
+                    "recovered-pending-cancel",
+                    "cancel",
+                    ClientJobProxy::cancelJob);
+
+            // ---- The force-stop path (CoordinatorService#stopJob) must take the same branch.
+            assertRecoveredPendingTerminationFreesRetainedExecution(
+                    engineClient,
+                    masterNodeConfig,
+                    coordinatorService,
+                    resourceManager,
+                    workerTaskExecutionService,
+                    workerAddress,
+                    "recovered-pending-stop",
+                    "stop",
+                    job -> coordinatorService.stopJob(job.getJobId()).join());
+        } finally {
+            if (engineClient != null) {
+                engineClient.close();
+            }
+            if (workerNode != null) {
+                workerNode.shutdown();
+            }
+            if (masterNode != null) {
+                masterNode.shutdown();
             }
         }
     }
@@ -538,41 +642,56 @@ public class PendingRestoreMasterFailoverIT {
                         });
     }
 
-    private static JobPipelineCheckpointData awaitCheckpoint(
-            JobClient jobClient,
+    /**
+     * Returns the first checkpoint of {@code jobId}/{@code PIPELINE_ID} that completed after {@code
+     * fenceMillis}, ordered by trigger timestamp.
+     *
+     * <p>The latest-checkpoint view cannot prove what the restored run produced first: it keeps the
+     * highest id ever stored, so a run that reset its counter to 1 satisfies an "id above the
+     * savepoint" check again as soon as enough periodic checkpoints were taken. The checkpoint
+     * monitor keeps every completion with its trigger timestamp, so a fence the test owns observes
+     * the first checkpoint the restored run actually produced.
+     *
+     * <p>The monitor is read in process instead of through the client checkpoint-history request:
+     * that request runs on an operation thread which resolves the distributed overview map, and
+     * blocking there can stall the query itself while a master switch settles, which would turn
+     * this oracle into a client timeout instead of an assertion.
+     */
+    private static CheckpointInfo awaitFirstCompletedCheckpointAfter(
+            CheckpointMonitorService checkpointMonitor,
             long jobId,
-            RestoreMode restoreMode,
-            long minExclusiveCheckpointId,
+            long fenceMillis,
             String description) {
-        AtomicReference<JobPipelineCheckpointData> latest = new AtomicReference<>();
+        AtomicReference<CheckpointInfo> firstAfterFence = new AtomicReference<>();
         Awaitility.await()
                 .atMost(STATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .pollInterval(500, TimeUnit.MILLISECONDS)
                 .untilAsserted(
                         () -> {
-                            List<JobPipelineCheckpointData> checkpoints =
-                                    jobClient.getCheckpointData(jobId, restoreMode);
-                            JobPipelineCheckpointData newest =
-                                    checkpoints.stream()
-                                            .filter(data -> data.getPipelineId() == PIPELINE_ID)
-                                            .max(
+                            CheckpointInfo earliest =
+                                    checkpointMonitor
+                                            .getHistory(
+                                                    jobId,
+                                                    PIPELINE_ID,
+                                                    CHECKPOINT_HISTORY_LIMIT,
+                                                    CheckpointStatus.COMPLETED)
+                                            .stream()
+                                            .map(CheckpointHistoryEntry::getCheckpointInfo)
+                                            .filter(info -> info != null)
+                                            .filter(
+                                                    info ->
+                                                            info.getTriggerTimestamp()
+                                                                    >= fenceMillis)
+                                            .min(
                                                     Comparator.comparingLong(
-                                                            JobPipelineCheckpointData
-                                                                    ::getCheckpointId))
+                                                            CheckpointInfo::getTriggerTimestamp))
                                             .orElse(null);
                             Assertions.assertNotNull(
-                                    newest, "no " + restoreMode + " checkpoint for " + description);
-                            Assertions.assertTrue(
-                                    newest.getCheckpointId() > minExclusiveCheckpointId,
-                                    "waiting for a "
-                                            + description
-                                            + " above id "
-                                            + minExclusiveCheckpointId
-                                            + " but the latest is "
-                                            + newest.getCheckpointId());
-                            latest.set(newest);
+                                    earliest,
+                                    "no " + description + " completed after the restore fence");
+                            firstAfterFence.set(earliest);
                         });
-        return latest.get();
+        return firstAfterFence.get();
     }
 
     private static void awaitStatus(
@@ -762,6 +881,241 @@ public class PendingRestoreMasterFailoverIT {
             ResourceManager resourceManager, Address workerAddress, long jobId) {
         return slicesByJob(resourceManager, workerAddress)
                 .getOrDefault(jobId, Collections.emptySet());
+    }
+
+    /**
+     * Drives one job through the recovered-pending termination boundary: admit it onto the whole
+     * fixed pool, pin the state a master switch leaves behind, and require the termination request
+     * to stop the retained worker executions before the freed slices may be reused.
+     */
+    private static void assertRecoveredPendingTerminationFreesRetainedExecution(
+            SeaTunnelClient engineClient,
+            SeaTunnelConfig seaTunnelConfig,
+            CoordinatorService coordinatorService,
+            ResourceManager resourceManager,
+            TaskExecutionService workerTaskExecutionService,
+            Address workerAddress,
+            String jobName,
+            String action,
+            Consumer<ClientJobProxy> terminationRequest)
+            throws Exception {
+        ClientJobProxy targetJob = submit(engineClient, seaTunnelConfig, jobName);
+        long targetJobId = targetJob.getJobId();
+        ClientJobProxy replacementJob = null;
+        try {
+            awaitStatus(coordinatorService, targetJobId, JobStatus.RUNNING);
+            awaitOwnsSlices(resourceManager, workerAddress, targetJobId, SLOTS_PER_JOB);
+
+            JobMaster targetJobMaster = coordinatorService.getJobMaster(targetJobId);
+            Assertions.assertNotNull(
+                    targetJobMaster,
+                    "the running job must be tracked by the coordinator before it is pinned");
+            // The retained execution must be running on the worker before the gate: a task group
+            // that is still being deployed has no worker execution context yet, and a master switch
+            // can only leave behind task groups the previous master actually deployed.
+            List<TaskGroupLocation> deployedTaskGroups = taskGroupsOf(targetJobMaster);
+            Assertions.assertFalse(
+                    deployedTaskGroups.isEmpty(),
+                    "the job must own at least one deployed task group before it is pinned");
+            awaitAllExecutionsActive(workerTaskExecutionService, deployedTaskGroups);
+
+            List<TaskGroupLocation> retainedTaskGroups =
+                    pinRecoveredPendingRecoveryState(coordinatorService, targetJobMaster);
+
+            // The gate must produce the recovered shape, otherwise the assertions below would be
+            // satisfied by a plain pending job that owns nothing.
+            Assertions.assertEquals(
+                    SLOTS_PER_JOB,
+                    slicesOwnedBy(resourceManager, workerAddress, targetJobId).size(),
+                    "the pinned job must still own the whole fixed pool");
+            Assertions.assertEquals(
+                    deployedTaskGroups,
+                    retainedTaskGroups,
+                    "the pinned job must keep exactly the task groups it had deployed");
+            Assertions.assertTrue(
+                    isAnyExecutionActive(workerTaskExecutionService, retainedTaskGroups),
+                    "the pinned job must still execute on the worker before the "
+                            + action
+                            + " request: "
+                            + retainedTaskGroups);
+
+            // The replacement is queued on the same fixed pool before the request: it may only be
+            // admitted onto slices that no retained execution is using any more.
+            replacementJob = submit(engineClient, seaTunnelConfig, jobName + "-replacement");
+            long replacementJobId = replacementJob.getJobId();
+            awaitStatus(coordinatorService, replacementJobId, JobStatus.PENDING);
+
+            terminationRequest.accept(targetJob);
+
+            long deadlineMillis =
+                    System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(STATE_TIMEOUT_SECONDS);
+            while (System.currentTimeMillis() < deadlineMillis) {
+                boolean retainedExecutionActive =
+                        isAnyExecutionActive(workerTaskExecutionService, retainedTaskGroups);
+                boolean slicesReportedFree =
+                        slicesOwnedBy(resourceManager, workerAddress, targetJobId).isEmpty();
+                Assertions.assertFalse(
+                        retainedExecutionActive && slicesReportedFree,
+                        action
+                                + " reported the fixed slices of job "
+                                + targetJobId
+                                + " as free while its retained worker task groups were still executing: "
+                                + retainedTaskGroups);
+                if (!retainedExecutionActive
+                        && slicesReportedFree
+                        && JobStatus.RUNNING.equals(
+                                coordinatorService.getJobStatus(replacementJobId))) {
+                    break;
+                }
+                Thread.sleep(100);
+            }
+
+            // The termination path may delete the pending job's state maps once it is terminal, so
+            // only the absence of a non-terminal state is asserted here; the durable evidence is
+            // the worker execution and slice ownership checked below.
+            JobStatus targetFinalStatus = targetJobMaster.getJobStatus();
+            Assertions.assertTrue(
+                    targetFinalStatus == null || JobStatus.CANCELED.equals(targetFinalStatus),
+                    action
+                            + " must not leave the pending job in "
+                            + targetFinalStatus
+                            + " after terminating it");
+            Assertions.assertFalse(
+                    isAnyExecutionActive(workerTaskExecutionService, retainedTaskGroups),
+                    action
+                            + " left worker task groups running for job "
+                            + targetJobId
+                            + ": "
+                            + retainedTaskGroups);
+            Assertions.assertTrue(
+                    slicesOwnedBy(resourceManager, workerAddress, targetJobId).isEmpty(),
+                    action + " left fixed slices owned by job " + targetJobId);
+
+            // Capacity is only usable again because the retained execution really terminated.
+            awaitStatus(coordinatorService, replacementJobId, JobStatus.RUNNING);
+            awaitOwnsSlices(resourceManager, workerAddress, replacementJobId, SLOTS_PER_JOB);
+
+            // Ending the replacement must return the whole fixed pool, so the termination path did
+            // not leave the cancelled job's ownership behind.
+            replacementJob.cancelJob();
+            awaitStatus(coordinatorService, replacementJobId, JobStatus.CANCELED);
+            replacementJob = null;
+            awaitWholePoolUnassigned(resourceManager, workerAddress);
+        } finally {
+            cancelQuietly(targetJob);
+            cancelQuietly(replacementJob);
+        }
+    }
+
+    /**
+     * Recovery gate: reproduces the state {@code
+     * CoordinatorService#restoreJobFromMasterActiveSwitch} leaves behind for a job whose worker
+     * tasks survived the switch.
+     *
+     * <p>The rebuilt {@code JobMaster} is forced back to {@link JobStatus#PENDING} and its plan,
+     * pipeline and vertex state processes are stopped, exactly as a plan rebuilt from distributed
+     * state has never started them. The worker task groups and the persisted slice ownership are
+     * deliberately left untouched, so the job is pending only from the coordinator's point of view,
+     * which is the state the cancel and force-stop paths have to handle.
+     *
+     * @return the task groups the job still has deployed on the worker
+     */
+    private static List<TaskGroupLocation> pinRecoveredPendingRecoveryState(
+            CoordinatorService coordinatorService, JobMaster jobMaster) {
+        PhysicalPlan physicalPlan = jobMaster.getPhysicalPlan();
+        List<SubPlan> pipelines = physicalPlan.getPipelineList();
+        pipelines.forEach(SubPlan::stopSubPlanStateProcess);
+        pipelines.forEach(
+                pipeline -> {
+                    pipeline.getCoordinatorVertexList().forEach(PhysicalVertex::stopPhysicalVertex);
+                    pipeline.getPhysicalVertexList().forEach(PhysicalVertex::stopPhysicalVertex);
+                });
+        physicalPlan.stopJobStateProcess();
+        physicalPlan.updateJobState(JobStatus.PENDING);
+        Assertions.assertEquals(
+                JobStatus.PENDING,
+                coordinatorService.getJobStatus(jobMaster.getJobId()),
+                "the recovery gate must leave the job pending");
+        return taskGroupsOf(jobMaster);
+    }
+
+    /** Task groups the plan owns, coordinator groups first. */
+    private static List<TaskGroupLocation> taskGroupsOf(JobMaster jobMaster) {
+        List<TaskGroupLocation> taskGroups = new ArrayList<>();
+        jobMaster
+                .getPhysicalPlan()
+                .getPipelineList()
+                .forEach(
+                        pipeline -> {
+                            pipeline.getCoordinatorVertexList()
+                                    .forEach(
+                                            vertex ->
+                                                    taskGroups.add(vertex.getTaskGroupLocation()));
+                            pipeline.getPhysicalVertexList()
+                                    .forEach(
+                                            vertex ->
+                                                    taskGroups.add(vertex.getTaskGroupLocation()));
+                        });
+        return taskGroups;
+    }
+
+    /**
+     * Waits until the worker executes every given task group. A task group that is still being
+     * deployed has no execution context yet, so gating before this point would cancel nothing and
+     * would not reproduce the retained-execution boundary.
+     */
+    private static void awaitAllExecutionsActive(
+            TaskExecutionService taskExecutionService, List<TaskGroupLocation> taskGroups) {
+        Awaitility.await()
+                .atMost(60, TimeUnit.SECONDS)
+                .pollInterval(100, TimeUnit.MILLISECONDS)
+                .untilAsserted(
+                        () ->
+                                taskGroups.forEach(
+                                        taskGroup ->
+                                                Assertions.assertNotNull(
+                                                        taskExecutionService
+                                                                .getActiveExecutionContext(
+                                                                        taskGroup),
+                                                        "the job must execute its worker task group "
+                                                                + taskGroup
+                                                                + " before the recovery gate")));
+    }
+
+    /** True when the worker still executes at least one of the given task groups. */
+    private static boolean isAnyExecutionActive(
+            TaskExecutionService taskExecutionService, List<TaskGroupLocation> taskGroups) {
+        for (TaskGroupLocation taskGroup : taskGroups) {
+            try {
+                if (taskExecutionService.getActiveExecutionContext(taskGroup) != null) {
+                    return true;
+                }
+            } catch (TaskGroupContextNotFoundException e) {
+                // The worker already dropped this deployment.
+            }
+        }
+        return false;
+    }
+
+    private static void awaitWholePoolUnassigned(
+            ResourceManager resourceManager, Address workerAddress) {
+        Awaitility.await()
+                .atMost(60, TimeUnit.SECONDS)
+                .pollInterval(200, TimeUnit.MILLISECONDS)
+                .untilAsserted(
+                        () -> {
+                            WorkerProfile profile = workerProfile(resourceManager, workerAddress);
+                            Assertions.assertNotNull(profile, "the worker must stay registered");
+                            Assertions.assertEquals(
+                                    0,
+                                    profile.getAssignedSlots().length,
+                                    "no slice may stay assigned after every job ended: "
+                                            + slicesByJob(resourceManager, workerAddress));
+                            Assertions.assertEquals(
+                                    SLOT_NUM,
+                                    profile.getUnassignedSlots().length,
+                                    "the whole fixed pool must be unassigned again");
+                        });
     }
 
     private static void cancelQuietly(ClientJobProxy jobProxy) {

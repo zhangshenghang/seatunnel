@@ -49,6 +49,17 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 public class PhysicalPlan {
 
+    /**
+     * How long a normal cancellation of a pending job waits for its retained worker executions to
+     * confirm termination before it stops claiming their capacity. The budget matches the retry
+     * policy used elsewhere ({@link Constant#OPERATION_RETRY_TIME} attempts) so a cancel request
+     * stays bounded while a slow connector still gets time to leave its slot.
+     */
+    private static final long PENDING_CANCEL_TERMINATION_TIMEOUT_MILLIS = 60_000L;
+
+    /** Delay between two worker termination checks of a cancelled pending job. */
+    private static final long PENDING_CANCEL_TERMINATION_POLL_INTERVAL_MILLIS = 200L;
+
     private final List<SubPlan> pipelineList;
 
     private final AtomicInteger finishedPipelineNum = new AtomicInteger(0);
@@ -229,6 +240,14 @@ public class PhysicalPlan {
      * released, permanently poisoning a fixed slot pool. The pending job is also no longer
      * reachable through the running-job map, so its regular task-state callbacks cannot be relied
      * on to release anything: cancel the task groups and release the persisted slot ownership here.
+     *
+     * <p>Cancelling is not the same as terminating: {@link SubPlan#forceStopPipeline()} only
+     * requests the cancellation and publishes a local terminal state. The slots of a retained
+     * execution are therefore released only after {@link PhysicalVertex#awaitExecutionTerminated}
+     * confirms that the worker execution has terminated or that its worker is gone. If that
+     * confirmation does not arrive before the deadline, the ownership is deliberately kept, so a
+     * slow or interrupt-resistant task can never write into a slot that was already handed to
+     * another job; the failed reclamation is logged instead of being reported as freed capacity.
      */
     private void cancelDeployedTasksOfPendingJob() {
         if (pipelineList.stream()
@@ -245,7 +264,40 @@ public class PhysicalPlan {
         jobMaster.neverNeedRestore();
         pipelineList.forEach(SubPlan::markCancelRequested);
         pipelineList.forEach(SubPlan::forceStopPipeline);
+        if (!awaitDeployedTasksTerminated()) {
+            log.error(
+                    "{} still has worker tasks that did not confirm termination, keeping their slot allocations instead of reporting freed capacity.",
+                    jobFullName);
+            return;
+        }
         pipelineList.forEach(jobMaster::releasePipelineResource);
+    }
+
+    /**
+     * Waits until every task group this plan retained on a worker has terminated, or its worker is
+     * gone. The deadline is shared by all task groups of the plan so a single unresponsive task
+     * group cannot multiply the cancel latency.
+     *
+     * @return {@code true} when no retained worker execution is left, {@code false} on timeout
+     */
+    private boolean awaitDeployedTasksTerminated() {
+        long deadlineMillis =
+                System.currentTimeMillis() + PENDING_CANCEL_TERMINATION_TIMEOUT_MILLIS;
+        for (SubPlan pipeline : pipelineList) {
+            for (PhysicalVertex vertex : pipeline.getCoordinatorVertexList()) {
+                if (!vertex.awaitExecutionTerminated(
+                        deadlineMillis, PENDING_CANCEL_TERMINATION_POLL_INTERVAL_MILLIS)) {
+                    return false;
+                }
+            }
+            for (PhysicalVertex vertex : pipeline.getPhysicalVertexList()) {
+                if (!vertex.awaitExecutionTerminated(
+                        deadlineMillis, PENDING_CANCEL_TERMINATION_POLL_INTERVAL_MILLIS)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     public void savepointJob() {

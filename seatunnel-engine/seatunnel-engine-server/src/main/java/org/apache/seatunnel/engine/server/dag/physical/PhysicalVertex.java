@@ -212,42 +212,103 @@ public class PhysicalVertex {
     }
 
     private boolean checkTaskGroupIsExecuting(TaskGroupLocation taskGroupLocation) {
+        return Boolean.TRUE.equals(queryWorkerExecutionActive(taskGroupLocation));
+    }
+
+    /**
+     * Queries whether the execution this vertex retained on its worker is still active there.
+     *
+     * <p>Returns {@link Boolean#FALSE} when the task group is not deployed any more or the worker
+     * running it left the cluster, because a lost worker fences the execution. Returns {@code null}
+     * when the answer could not be obtained: a failed RPC is not proof that user code stopped, so
+     * callers that hand capacity back must keep waiting instead of treating it as terminated.
+     */
+    private Boolean queryWorkerExecutionActive(TaskGroupLocation taskGroupLocation) {
         IMap<PipelineLocation, Map<TaskGroupLocation, SlotProfile>> ownedSlotProfilesIMap =
                 nodeEngine.getHazelcastInstance().getMap(Constant.IMAP_OWNED_SLOT_PROFILES);
         SlotProfile slotProfile =
                 getOwnedSlotProfilesByTaskGroup(taskGroupLocation, ownedSlotProfilesIMap);
-        if (null != slotProfile) {
-            Address worker = slotProfile.getWorker();
-            List<Address> members =
-                    nodeEngine.getClusterService().getMembers().stream()
-                            .map(Member::getAddress)
-                            .collect(Collectors.toList());
-            if (!members.contains(worker)) {
+        if (slotProfile == null) {
+            return Boolean.FALSE;
+        }
+        Address worker = slotProfile.getWorker();
+        List<Address> members =
+                nodeEngine.getClusterService().getMembers().stream()
+                        .map(Member::getAddress)
+                        .collect(Collectors.toList());
+        if (!members.contains(worker)) {
+            log.warn(
+                    "The node:{} running the taskGroup {} no longer exists, return false.",
+                    worker,
+                    taskGroupLocation);
+            return Boolean.FALSE;
+        }
+        InvocationFuture<Object> invoke =
+                nodeEngine
+                        .getOperationService()
+                        .createInvocationBuilder(
+                                SeaTunnelServer.SERVICE_NAME,
+                                new CheckTaskGroupIsExecutingOperation(taskGroupLocation),
+                                worker)
+                        .invoke();
+        try {
+            return (Boolean) invoke.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error(
+                    String.format(
+                            "Execution of CheckTaskGroupIsExecutingOperation %s was interrupted.",
+                            taskGroupLocation),
+                    e);
+        } catch (ExecutionException e) {
+            log.error(
+                    String.format(
+                            "Execution of CheckTaskGroupIsExecutingOperation %s failed, the worker execution state is unknown. ",
+                            taskGroupLocation),
+                    e);
+        }
+        return null;
+    }
+
+    /**
+     * Waits until the execution this vertex retained on its worker has terminated, or the worker
+     * running it is gone.
+     *
+     * <p>A cancel request is only an acknowledgment of the request: {@code
+     * TaskExecutionService#cancelTaskGroup} cancels the task futures and schedules {@code
+     * Task#cancel()} asynchronously, while the task group keeps its slot until its execution
+     * context leaves the worker. Handing that slot back to the pool earlier advertises capacity
+     * that the previous execution can still use, so a slow or interrupt-resistant task could keep
+     * writing while replacement work already runs on the "freed" slot.
+     *
+     * @param deadlineMillis {@link System#currentTimeMillis()} based deadline shared by the whole
+     *     cancel operation
+     * @param pollIntervalMillis delay between two worker checks
+     * @return {@code true} when the worker execution has terminated or its worker is gone, {@code
+     *     false} when the deadline passed while it was still active or the wait was interrupted
+     */
+    public boolean awaitExecutionTerminated(long deadlineMillis, long pollIntervalMillis) {
+        while (true) {
+            if (Boolean.FALSE.equals(queryWorkerExecutionActive(taskGroupLocation))) {
+                return true;
+            }
+            long remainingMillis = deadlineMillis - System.currentTimeMillis();
+            if (remainingMillis <= 0) {
                 log.warn(
-                        "The node:{} running the taskGroup {} no longer exists, return false.",
-                        worker.toString(),
-                        taskGroupLocation);
+                        "{} did not confirm termination on the worker before the cancel deadline, its slot must not be reused.",
+                        taskFullName);
                 return false;
             }
-            InvocationFuture<Object> invoke =
-                    nodeEngine
-                            .getOperationService()
-                            .createInvocationBuilder(
-                                    SeaTunnelServer.SERVICE_NAME,
-                                    new CheckTaskGroupIsExecutingOperation(taskGroupLocation),
-                                    worker)
-                            .invoke();
             try {
-                return (Boolean) invoke.get();
-            } catch (InterruptedException | ExecutionException e) {
-                log.error(
-                        String.format(
-                                "Execution of CheckTaskGroupIsExecutingOperation %s failed, checkTaskGroupIsExecuting return false. ",
-                                taskGroupLocation),
-                        e);
+                Thread.sleep(Math.min(pollIntervalMillis, remainingMillis));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn(
+                        "{} was interrupted while waiting for the worker execution to terminate.",
+                        taskFullName);
+                return false;
             }
         }
-        return false;
     }
 
     private SlotProfile getOwnedSlotProfilesByTaskGroup(
